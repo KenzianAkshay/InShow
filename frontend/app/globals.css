@@ -1,0 +1,273 @@
+@import "tailwindcss";
+
+/* Dark mode is toggled by a `.dark` class on <html> (next-themes). */
+@custom-variant dark (&:is(.dark *));
+
+/* ----------------------------------------------------------------------------
+   Design tokens. Coral + navy brand carried onto a glass + brushed-metal skin.
+   Light mode = brushed steel; dark mode = gunmetal. Semantic names mirror the
+   shadcn token vocabulary so component classes stay theme-agnostic.
+---------------------------------------------------------------------------- */
+:root {
+  --background: #e9edf3;
+  --foreground: #1d2a38;
+  --card: rgba(255, 255, 255, 0.7);
+  --card-foreground: #1d2a38;
+  --popover: #ffffff;
+  --popover-foreground: #1d2a38;
+  --primary: #ff7a59;
+  --primary-foreground: #ffffff;
+  --secondary: #e2e8f0;
+  --secondary-foreground: #33475b;
+  --muted: #e2e8f0;
+  --muted-foreground: #5b7088;
+  --accent: #0091ae;
+  --accent-foreground: #ffffff;
+  --destructive: #e23d44;
+  --destructive-foreground: #ffffff;
+  --success: #00a892;
+  --border: rgba(51, 71, 91, 0.14);
+  --input: rgba(51, 71, 91, 0.18);
+  --ring: #ff7a59;
+  --radius: 0.95rem;
+
+  /* Metal / glass */
+  --metal-hi: rgba(255, 255, 255, 0.95);
+  --metal-base: rgba(229, 235, 243, 0.55);
+  --metal-lo: rgba(196, 207, 221, 0.5);
+  --metal-sheen: rgba(255, 255, 255, 0.85);
+  --glass-bg: rgba(255, 255, 255, 0.62);
+  --glass-border: rgba(255, 255, 255, 0.7);
+  --glass-highlight: rgba(255, 255, 255, 0.75);
+  --glass-shadow: rgba(31, 45, 61, 0.12);
+  --app-glow-1: rgba(255, 122, 89, 0.16);
+  --app-glow-2: rgba(0, 145, 174, 0.14);
+  --grid-line: rgba(51, 71, 91, 0.05);
+}
+
+.dark {
+  --background: #0a0e14;
+  --foreground: #e7eef6;
+  --card: rgba(22, 28, 39, 0.62);
+  --card-foreground: #e7eef6;
+  --popover: #10151e;
+  --popover-foreground: #e7eef6;
+  --primary: #ff7a59;
+  --primary-foreground: #ffffff;
+  --secondary: rgba(255, 255, 255, 0.06);
+  --secondary-foreground: #cdd9e6;
+  --muted: rgba(255, 255, 255, 0.05);
+  --muted-foreground: #8ea3ba;
+  --accent: #2bc6df;
+  --accent-foreground: #04121a;
+  --destructive: #ff5c63;
+  --destructive-foreground: #ffffff;
+  --success: #1bd3ba;
+  --border: rgba(255, 255, 255, 0.09);
+  --input: rgba(255, 255, 255, 0.13);
+  --ring: #ff7a59;
+
+  --metal-hi: rgba(255, 255, 255, 0.12);
+  --metal-base: rgba(44, 53, 67, 0.55);
+  --metal-lo: rgba(8, 12, 18, 0.65);
+  --metal-sheen: rgba(255, 255, 255, 0.2);
+  --glass-bg: rgba(20, 26, 36, 0.58);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-highlight: rgba(255, 255, 255, 0.14);
+  --glass-shadow: rgba(0, 0, 0, 0.5);
+  --app-glow-1: rgba(255, 122, 89, 0.18);
+  --app-glow-2: rgba(43, 198, 223, 0.14);
+  --grid-line: rgba(255, 255, 255, 0.04);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 0.4rem);
+  --radius-md: calc(var(--radius) - 0.2rem);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 0.3rem);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 35%, transparent);
+  }
+  /* Themed scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--input) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--input);
+    border-radius: 999px;
+  }
+}
+
+/* ----------------------------------------------------------------------------
+   Liquid-metal / glass surface classes
+---------------------------------------------------------------------------- */
+@layer components {
+  /* Frosted glass card */
+  .glass {
+    position: relative;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    backdrop-filter: blur(18px) saturate(160%);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    box-shadow:
+      0 1px 0 0 var(--glass-highlight) inset,
+      0 18px 40px -24px var(--glass-shadow);
+  }
+
+  /* Brushed-metal surface with a soft top highlight; used on nav, hero panels,
+     and the 3D frame. */
+  .metal {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    background: linear-gradient(
+      180deg,
+      var(--metal-hi) 0%,
+      var(--metal-base) 42%,
+      var(--metal-lo) 100%
+    );
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    backdrop-filter: blur(14px) saturate(150%);
+    -webkit-backdrop-filter: blur(14px) saturate(150%);
+  }
+
+  /* Composable specular streak that sweeps across on hover. Works on any
+     surface (buttons, cards, the metal class). The streak is faint and
+     non-interactive so it reads as a passing glint over content. */
+  .sheen {
+    position: relative;
+    overflow: hidden;
+  }
+  .sheen::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      115deg,
+      transparent 30%,
+      var(--metal-sheen) 50%,
+      transparent 70%
+    );
+    transform: translateX(-130%);
+    opacity: 0.5;
+  }
+  .sheen:hover::after {
+    animation: sheen-sweep 0.9s ease;
+  }
+
+  /* Glowing focus ring shared by inputs/buttons */
+  .ring-focus:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px var(--background),
+      0 0 0 4px color-mix(in oklab, var(--ring) 70%, transparent);
+  }
+}
+
+/* ----------------------------------------------------------------------------
+   Motion
+---------------------------------------------------------------------------- */
+@keyframes sheen-sweep {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -14px, 0);
+  }
+}
+
+@keyframes glow-drift {
+  0% {
+    transform: translate3d(-4%, -2%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(4%, 3%, 0) scale(1.08);
+  }
+  100% {
+    transform: translate3d(-4%, -2%, 0) scale(1);
+  }
+}
+
+/* Retained ontology highlight keyframe (used by the 2D legend / overlays). */
+@keyframes ontology-pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

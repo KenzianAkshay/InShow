@@ -1,0 +1,31 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+uv.lock
+
+# Secrets / local config
+.env
+
+# Node / Next.js
+node_modules/
+.next/
+*.tsbuildinfo
+next-env.d.ts
+
+# Databases
+*.db
+
+# Playwright
+test-results/
+playwright-report/
+
+# Logs & scratch
+*.log
+scratch_pids.txt
+
+# Stray / OS files
+-b
+.DS_Store
+Thumbs.db
