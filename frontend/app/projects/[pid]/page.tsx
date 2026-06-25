@@ -69,6 +69,7 @@ export default function ProjectDetail() {
         >
           <option value="standard">Standard</option>
           <option value="ontology_creation">Ontology Creation</option>
+          <option value="booth_layout">Booth Layout</option>
         </Select>
         <Button type="submit">
           <Plus className="size-4" />
@@ -110,7 +111,9 @@ export default function ProjectDetail() {
                   <div className="mt-2 text-sm text-muted-foreground">
                     {a.type === "ontology_creation"
                       ? "Ontology Creation"
-                      : "Standard"}
+                      : a.type === "booth_layout"
+                        ? "Booth Layout"
+                        : "Standard"}
                     {a.model_provider
                       ? ` · ${a.model_provider}/${a.model_name}`
                       : ""}

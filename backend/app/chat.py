@@ -4,6 +4,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from app import booth_pipeline
 from app.auth import require_user
 from app.db import connect
 from app.llm import get_provider
@@ -116,10 +117,58 @@ def chat(
         "SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at",
         (session_id,),
     ).fetchall()
+    config = json.loads(agent["config"])
+
+    # Booth Layout agents run the deterministic spatial pipeline instead of the
+    # generic ontology-grounded chat. The prior layout "program" is carried in
+    # the last assistant message metadata so feedback iterates on it.
+    if agent["type"] == "booth_layout":
+        prev_row = conn.execute(
+            "SELECT metadata FROM messages WHERE session_id = ? AND role = 'assistant' "
+            "ORDER BY created_at DESC LIMIT 1",
+            (session_id,),
+        ).fetchone()
+        conn.close()
+        prev_program = None
+        if prev_row:
+            try:
+                prev_program = json.loads(prev_row["metadata"]).get("program")
+            except json.JSONDecodeError:
+                prev_program = None
+        provider = (
+            get_provider(
+                agent["model_provider"], agent["model_name"], config.get("api_key")
+            )
+            if booth_pipeline.has_api_key(config)
+            else None
+        )
+        history = [{"role": r["role"], "content": r["content"]} for r in prior[:-1]]
+        result = booth_pipeline.run(
+            provider, agent["data_source_id"], payload.content, history, prev_program
+        )
+        empty = {"nodes": [], "edges": []}
+        metadata = {
+            "traversal": empty,
+            "artifact": result["artifact"],
+            "program": result["program"],
+        }
+        conn = connect()
+        conn.execute(
+            "INSERT INTO messages (session_id, role, content, metadata) "
+            "VALUES (?, 'assistant', ?, ?)",
+            (session_id, result["content"], json.dumps(metadata)),
+        )
+        conn.commit()
+        conn.close()
+        return {
+            "content": result["content"],
+            "traversal": empty,
+            "artifact": result["artifact"],
+        }
+
     conn.close()
 
     grounding = _ontology_context(request, payload.content, agent["show_project_id"])
-    config = json.loads(agent["config"])
     system = "You are an InShow exhibitor-services agent for trade shows."
     if config.get("ontology_instructions"):
         system += "\n\n" + config["ontology_instructions"]

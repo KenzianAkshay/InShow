@@ -114,7 +114,30 @@ export type Artifact =
   | { type: "line"; title?: string; data: { label: string; value: number }[] }
   | { type: "metrics"; title?: string; items: { label: string; value: string | number }[] }
   | { type: "table"; title?: string; columns: string[]; rows: (string | number)[][] }
-  | { type: "map"; title?: string; points: { lat: number; lng: number; label?: string }[] };
+  | { type: "map"; title?: string; points: { lat: number; lng: number; label?: string }[] }
+  | {
+      type: "booth_layout";
+      title?: string;
+      units?: string;
+      booth: { width: number; depth: number; type: string; open_sides: string[] };
+      zones: {
+        id: string;
+        name: string;
+        kind: string;
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        height?: number;
+        color?: string;
+      }[];
+      aisles?: { x: number; y: number; w: number; h: number }[];
+      validation?: {
+        ok: boolean;
+        repaired?: number;
+        checks: { name: string; ok: boolean; detail?: string }[];
+      };
+    };
 
 export type ChatMessage = {
   role: string;

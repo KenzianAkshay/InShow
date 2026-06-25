@@ -139,7 +139,9 @@ export default function AgentSetup() {
         <p className="mt-1 text-sm text-muted-foreground">
           {agent.type === "ontology_creation"
             ? "Ontology Creation agent"
-            : "Standard agent"}
+            : agent.type === "booth_layout"
+              ? "Booth Layout agent"
+              : "Standard agent"}
         </p>
       </motion.div>
 

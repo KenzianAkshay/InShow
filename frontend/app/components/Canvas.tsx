@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { LayoutDashboard } from "lucide-react";
 import { Artifact } from "@/lib/api";
+import BoothLayout from "@/app/components/booth/BoothLayout";
 
 const AXIS = "var(--muted-foreground)";
 const GRID = "var(--border)";
@@ -169,6 +170,7 @@ export default function Canvas({ artifact }: { artifact: Artifact | null }) {
             Agent-generated charts, tables, and maps appear here.
           </p>
         )}
+        {artifact?.type === "booth_layout" && <BoothLayout artifact={artifact} />}
         {mounted && artifact?.type === "bar" && (
           <BarArtifact data={artifact.data} />
         )}
