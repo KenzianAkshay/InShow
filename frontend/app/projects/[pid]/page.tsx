@@ -23,6 +23,8 @@ export default function ProjectDetail() {
   const [describing, setDescribing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirmAgent, setConfirmAgent] = useState<Agent | null>(null);
+  const [deletingAgent, setDeletingAgent] = useState(false);
 
   useEffect(() => {
     api.getProject(projectId).then(setProject).catch(() => router.push("/"));
@@ -44,6 +46,18 @@ export default function ProjectDetail() {
       router.push("/");
     } catch {
       setDeleting(false);
+    }
+  }
+
+  async function removeAgent() {
+    if (!confirmAgent) return;
+    setDeletingAgent(true);
+    try {
+      await api.deleteAgent(confirmAgent.id);
+      setAgents((prev) => prev.filter((a) => a.id !== confirmAgent.id));
+      setConfirmAgent(null);
+    } finally {
+      setDeletingAgent(false);
     }
   }
 
@@ -141,8 +155,66 @@ export default function ProjectDetail() {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {confirmAgent && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm"
+            onClick={() => !deletingAgent && setConfirmAgent(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              onClick={(e) => e.stopPropagation()}
+              className="glass w-full max-w-md p-6"
+            >
+              <div className="flex items-center gap-3">
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-destructive/15 text-destructive">
+                  <TriangleAlert className="size-5" />
+                </span>
+                <div>
+                  <h2 className="text-lg font-bold tracking-tight">
+                    Delete this agent?
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    &ldquo;{confirmAgent.name}&rdquo;
+                  </p>
+                </div>
+              </div>
+              <p className="mt-4 text-sm text-muted-foreground">
+                This removes the agent and its chat history. The project&apos;s
+                ontology and data sources are not affected.
+              </p>
+              <div className="mt-6 flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setConfirmAgent(null)}
+                  disabled={deletingAgent}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={removeAgent}
+                  disabled={deletingAgent}
+                  className="bg-destructive text-white hover:bg-destructive/90"
+                >
+                  <Trash2 className="size-4" />
+                  {deletingAgent ? "Deleting…" : "Delete agent"}
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="mt-6">
-        <AgentRibbon projectId={projectId} />
+        <AgentRibbon
+          key={agents.map((a) => a.id).join(",")}
+          projectId={projectId}
+        />
       </div>
 
       <h2 className="mb-3 text-xl font-semibold tracking-tight">Agents</h2>
@@ -181,6 +253,7 @@ export default function ProjectDetail() {
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, delay: Math.min(i * 0.04, 0.3) }}
+              className="group/card relative"
             >
               <Link
                 href={`/agents/${a.id}`}
@@ -213,6 +286,19 @@ export default function ProjectDetail() {
                 </div>
                 <ArrowRight className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1 group-hover:text-primary" />
               </Link>
+              <button
+                type="button"
+                aria-label={`Delete ${a.name}`}
+                title="Delete agent"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setConfirmAgent(a);
+                }}
+                className="ring-focus absolute right-2.5 top-2.5 z-10 grid size-7 place-items-center rounded-lg text-muted-foreground opacity-0 transition-all hover:bg-destructive/15 hover:text-destructive focus-visible:opacity-100 group-hover/card:opacity-100"
+              >
+                <Trash2 className="size-4" />
+              </button>
             </motion.div>
           ))}
         </div>
