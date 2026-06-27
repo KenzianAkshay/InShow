@@ -1,8 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.auth import require_user
 from app.db import connect
+from app.ingestion import parse_sheets
+from app.ontology import summarize_ontology
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_user)])
 
@@ -56,6 +60,73 @@ def get_project(project_id: int):
     if row is None:
         raise HTTPException(404, "Show project not found")
     return dict(row)
+
+
+def _list_sheets(location: str | None, name: str) -> list[dict]:
+    """Enumerate the tabs/record sets inside a data source file. A multi-tab
+    Excel workbook returns one entry per tab; CSV/JSON return a single entry.
+    Best-effort — a missing or unparseable file yields no tabs."""
+    try:
+        if not location or not Path(location).exists():
+            return []
+        sheets = parse_sheets(Path(location).read_bytes(), name)
+        return [{"name": tab, "records": len(rows)} for tab, rows in sheets.items()]
+    except Exception:
+        return []
+
+
+@router.get("/projects/{project_id}/describe")
+def describe_project(project_id: int, request: Request):
+    """Read every component of a project — data sources, the ontology layer
+    summary, and agents — for the layered "Describe Project" view."""
+    conn = connect()
+    project = conn.execute(
+        "SELECT * FROM show_projects WHERE id = ?", (project_id,)
+    ).fetchone()
+    if project is None:
+        conn.close()
+        raise HTTPException(404, "Show project not found")
+    ds_rows = conn.execute(
+        "SELECT id, name, type, status, created_at, location FROM data_sources "
+        "WHERE show_project_id = ? ORDER BY created_at",
+        (project_id,),
+    ).fetchall()
+    agents = [
+        dict(r)
+        for r in conn.execute(
+            "SELECT id, name, type, model_provider, model_name, data_source_id "
+            "FROM agents WHERE show_project_id = ? ORDER BY created_at",
+            (project_id,),
+        ).fetchall()
+    ]
+    conn.close()
+
+    # Expand each data source into its tabs so multi-tab workbooks surface every
+    # tab as its own component in the Describe view.
+    data_sources = []
+    for r in ds_rows:
+        ds = {k: r[k] for k in ("id", "name", "type", "status", "created_at")}
+        ds["sheets"] = _list_sheets(r["location"], r["name"])
+        data_sources.append(ds)
+
+    ontology = {"classes": [], "relations": [], "node_total": 0, "relation_total": 0}
+    try:
+        driver = request.app.state.neo4j
+        driver.verify_connectivity()
+        ontology = summarize_ontology(driver, project_id)
+    except Exception:
+        pass  # Neo4j unavailable → empty ontology summary
+
+    return {
+        "project": {
+            "id": project["id"],
+            "name": project["name"],
+            "description": project["description"],
+        },
+        "data_sources": data_sources,
+        "ontology": ontology,
+        "agents": agents,
+    }
 
 
 @router.patch("/projects/{project_id}")

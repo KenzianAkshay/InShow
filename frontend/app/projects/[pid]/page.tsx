@@ -4,9 +4,10 @@ import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ArrowRight, Bot, Plus } from "lucide-react";
+import { ArrowRight, Bot, Layers, Plus } from "lucide-react";
 import { api, Agent, ShowProject } from "@/lib/api";
 import AgentRibbon from "@/app/components/AgentRibbon";
+import ProjectDescribe from "@/app/components/ProjectDescribe";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 import { Select } from "@/app/components/ui/select";
@@ -19,6 +20,7 @@ export default function ProjectDetail() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [name, setName] = useState("");
   const [type, setType] = useState("standard");
+  const [describing, setDescribing] = useState(false);
 
   useEffect(() => {
     api.getProject(projectId).then(setProject).catch(() => router.push("/"));
@@ -42,12 +44,25 @@ export default function ProjectDetail() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
       >
-        <h1 className="text-3xl font-bold tracking-tight">{project.name}</h1>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h1 className="text-3xl font-bold tracking-tight">{project.name}</h1>
+          <Button variant="secondary" onClick={() => setDescribing(true)}>
+            <Layers className="size-4" />
+            Describe Project
+          </Button>
+        </div>
         <p className="mt-2 max-w-prose text-sm text-muted-foreground">
           Agents in this show share one evolving ontology. Build it from any
           agent&apos;s setup page; every data set you add extends it.
         </p>
       </motion.div>
+
+      {describing && (
+        <ProjectDescribe
+          projectId={projectId}
+          onClose={() => setDescribing(false)}
+        />
+      )}
 
       <div className="mt-6">
         <AgentRibbon projectId={projectId} />
