@@ -8,7 +8,13 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
 from app.auth import require_user
 from app.db import DATABASE_PATH, connect
-from app.ontology import build_graph, infer_combined_ontology, read_ontology
+from app.ontology import (
+    build_graph,
+    class_instances,
+    infer_combined_ontology,
+    read_ontology,
+    schema_ontology,
+)
 
 DATA_DIR = Path(
     os.getenv("DATA_DIR") or Path(DATABASE_PATH).resolve().parent / "uploads"
@@ -185,3 +191,17 @@ def build_ontology(source_id: int, request: Request):
 @router.get("/ontology")
 def get_ontology(request: Request, project_id: int):
     return read_ontology(_neo4j(request), project_id)
+
+
+@router.get("/ontology/schema")
+def get_ontology_schema(request: Request, project_id: int):
+    """Class-level schema graph — the legible default view for the ontology layer."""
+    return schema_ontology(_neo4j(request), project_id)
+
+
+@router.get("/ontology/instances")
+def get_ontology_instances(
+    request: Request, project_id: int, label: str, limit: int = 150
+):
+    """Instances of one class plus their neighbours — drill-down from the schema."""
+    return class_instances(_neo4j(request), project_id, label, limit)

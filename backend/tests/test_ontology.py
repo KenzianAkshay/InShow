@@ -1,11 +1,13 @@
 from app.ontology import (
     build_graph,
+    class_instances,
     infer_combined_ontology,
     infer_ontology,
     instantiate_ontology,
     retrieve_context,
     sanitize_label,
     sanitize_rel,
+    schema_ontology,
 )
 
 ROWS = [
@@ -157,3 +159,76 @@ def test_retrieve_context_builds_traversal():
 def test_retrieve_context_empty_query():
     out = retrieve_context(_CtxDriver(), "a", project_id=1)  # too short for terms
     assert out == {"context": "", "traversal": {"nodes": [], "edges": []}}
+
+
+class _SchemaSession:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def run(self, query, **kw):
+        if "RETURN name, count(*)" in query:
+            return [
+                {"name": "Exhibitors", "count": 5},
+                {"name": "City", "count": 3},
+                {"name": None, "count": 1},  # filtered out
+            ]
+        if "RETURN frm AS from" in query:
+            return [
+                {"from": "Exhibitors", "to": "City", "type": "HAS_CITY", "count": 7}
+            ]
+        return []
+
+
+class _SchemaDriver:
+    def session(self):
+        return _SchemaSession()
+
+
+def test_schema_ontology_builds_class_graph():
+    out = schema_ontology(_SchemaDriver(), project_id=1)
+    assert [c["name"] for c in out["classes"]] == ["Exhibitors", "City"]
+    assert out["classes"][0]["count"] == 5
+    assert out["edges"] == [
+        {"from": "Exhibitors", "to": "City", "type": "HAS_CITY", "count": 7}
+    ]
+
+
+class _InstSession:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def run(self, query, **kw):
+        return [
+            {
+                "uid": "Exhibitors:abc",
+                "label": "Exhibitors",
+                "rels": [
+                    {
+                        "to": "City:Berlin",
+                        "toLabel": "City",
+                        "type": "HAS_CITY",
+                        "dir": "out",
+                    }
+                ],
+            }
+        ]
+
+
+class _InstDriver:
+    def session(self):
+        return _InstSession()
+
+
+def test_class_instances_builds_subgraph():
+    out = class_instances(_InstDriver(), project_id=1, label="Exhibitors")
+    uids = {n["uid"] for n in out["nodes"]}
+    assert uids == {"Exhibitors:abc", "City:Berlin"}
+    assert out["edges"] == [
+        {"from": "Exhibitors:abc", "to": "City:Berlin", "type": "HAS_CITY"}
+    ]

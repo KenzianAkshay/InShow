@@ -8,11 +8,22 @@ from app import booth_pipeline
 from app.auth import require_user
 from app.db import connect
 from app.llm import get_provider
-from app.ontology import retrieve_context
+from app.ontology import retrieve_context, summarize_ontology
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_user)])
 
 ARTIFACT_TYPES = {"bar", "line", "table", "metrics", "map"}
+GROUNDING_RULES = (
+    "STRICT GROUNDING — read carefully. This project has a knowledge graph "
+    "(ontology) built from the exhibitor's ingested data. You may answer ONLY "
+    "using the ontology and data provided below; treat it as your single source "
+    "of truth. Do NOT use outside or prior knowledge, and never invent entities, "
+    "values, or relationships that are not present in the provided data. If the "
+    "answer is not contained in the ontology and data below, say plainly that the "
+    "project's data does not contain that information, and (when useful) point to "
+    "what the ontology does cover. Do not speculate or generalise beyond the data."
+)
+
 CANVAS_RE = re.compile(r"```canvas\s*(\{.*?\})\s*```", re.DOTALL)
 CANVAS_GUIDE = (
     "When a visualization would help, append exactly one fenced block "
@@ -62,12 +73,64 @@ def _session_id(conn, agent_id: int, username: str) -> int:
 
 
 def _ontology_context(request: Request, query: str, project_id: int) -> dict:
+    """Gather everything the agent is allowed to reason over: a high-level
+    overview of the project's ontology (so it knows the universe of entities even
+    when a query matches no specific record) plus the records and relationships
+    that match the question."""
+    base = {"overview": None, "context": "", "traversal": {"nodes": [], "edges": []}}
     try:
         driver = request.app.state.neo4j
         driver.verify_connectivity()
-        return retrieve_context(driver, query, project_id)
+        overview = summarize_ontology(driver, project_id)
+        retrieved = retrieve_context(driver, query, project_id)
+        return {"overview": overview, **retrieved}
     except Exception:
-        return {"context": "", "traversal": {"nodes": [], "edges": []}}
+        return base
+
+
+def _build_system(config: dict, grounding: dict) -> str:
+    """Assemble a strictly-grounded system prompt: the agent may only use the
+    project's ontology and ingested data, never outside knowledge."""
+    system = "You are an InShow exhibitor-services agent for trade shows."
+    if config.get("ontology_instructions"):
+        system += "\n\n" + config["ontology_instructions"]
+    system += "\n\n" + GROUNDING_RULES
+
+    overview = grounding.get("overview")
+    if overview and overview.get("node_total"):
+        classes = ", ".join(
+            f"{c['name']} (×{c['count']})" for c in overview["classes"]
+        )
+        rels = ", ".join(
+            f"{r['name']} (×{r['count']})" for r in overview["relations"]
+        )
+        system += (
+            f"\n\nProject ontology layer — {overview['node_total']} nodes, "
+            f"{overview['relation_total']} relationships."
+            f"\nNode types: {classes or 'none'}."
+            f"\nRelationship types: {rels or 'none'}."
+        )
+    else:
+        system += (
+            "\n\nThis project has no ingested data or ontology yet, so you have no "
+            "facts to answer from. Tell the user to ingest data and build the "
+            "ontology first."
+        )
+
+    if grounding.get("context"):
+        system += (
+            "\n\nData relevant to the question (entities, their properties, and "
+            "relationships — your only source of facts):\n" + grounding["context"]
+        )
+    elif overview and overview.get("node_total"):
+        system += (
+            "\n\nNo specific records matched this question. Answer only if the "
+            "ontology overview above already contains the answer; otherwise say "
+            "the project's data does not cover it."
+        )
+
+    system += "\n\n" + CANVAS_GUIDE
+    return system
 
 
 @router.get("/agents/{agent_id}/messages")
@@ -169,12 +232,7 @@ def chat(
     conn.close()
 
     grounding = _ontology_context(request, payload.content, agent["show_project_id"])
-    system = "You are an InShow exhibitor-services agent for trade shows."
-    if config.get("ontology_instructions"):
-        system += "\n\n" + config["ontology_instructions"]
-    if grounding["context"]:
-        system += "\n\nRelevant ontology context:\n" + grounding["context"]
-    system += "\n\n" + CANVAS_GUIDE
+    system = _build_system(config, grounding)
 
     messages = [{"role": r["role"], "content": r["content"]} for r in prior]
     provider = get_provider(

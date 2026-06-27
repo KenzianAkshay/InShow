@@ -84,6 +84,47 @@ def test_upload_xlsx_multiple_tabs(auth, project):
     assert r.json()["records"] == 3
 
 
+def test_build_combined_ontology_across_tabs(auth_up, project):
+    """A real multi-tab workbook flows through parse -> combined inference ->
+    graph build, with the City dimension shared across both tabs collapsing to a
+    single node linked from each tab."""
+    import io
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws1 = wb.active
+    ws1.title = "Exhibitors"
+    ws1.append(["exhibitor", "city"])
+    ws1.append(["Acme", "Berlin"])
+    ws1.append(["Globex", "Berlin"])
+    ws2 = wb.create_sheet("Sessions")
+    ws2.append(["session", "city"])
+    ws2.append(["Keynote", "Berlin"])
+    ws2.append(["Workshop", "Berlin"])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    sid = auth_up.post(
+        f"/api/data-sources?project_id={project}",
+        files={
+            "file": (
+                "expo.xlsx",
+                buf.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    ).json()["id"]
+
+    summary = auth_up.post(f"/api/data-sources/{sid}/build").json()
+    # Exhibitors + Sessions + City; HAS_CITY shared; 4 record nodes + 1 City;
+    # 4 edges (two records per tab -> the one shared City:Berlin).
+    assert summary["classes"] == 3
+    assert summary["relations"] == 1
+    assert summary["nodes"] == 5
+    assert summary["edges"] == 4
+
+
 def test_upload_unknown_project(auth):
     assert auth.post(
         "/api/data-sources?project_id=999999",
@@ -114,6 +155,16 @@ def test_list_and_get(auth, project):
     assert any(d["id"] == sid for d in scoped)
     assert auth.get(f"/api/data-sources/{sid}").json()["type"] == "csv"
     assert auth.get("/api/data-sources/999999").status_code == 404
+
+
+def test_ontology_schema_and_instances_endpoints(auth_up, project):
+    # MockDriver returns no rows -> empty but well-formed payloads.
+    schema = auth_up.get(f"/api/ontology/schema?project_id={project}").json()
+    assert schema == {"classes": [], "edges": []}
+    inst = auth_up.get(
+        f"/api/ontology/instances?project_id={project}&label=City"
+    ).json()
+    assert inst == {"nodes": [], "edges": []}
 
 
 def test_build_and_ontology_require_neo4j(auth, project):

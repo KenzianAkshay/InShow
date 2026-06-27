@@ -231,12 +231,17 @@ def build_graph(driver: Driver, spec: dict, source_id: int, project_id: int) -> 
     }
 
 
+_INTERNAL_KEYS = {"uid", "project_id", "source_id", "ingested_at"}
+
+
 def retrieve_context(
-    driver: Driver, query: str, project_id: int, limit: int = 8
+    driver: Driver, query: str, project_id: int, limit: int = 12
 ) -> dict:
-    """Ground a prompt on the project's ontology: find entities matching the
-    query and their immediate neighbourhood. Returns a context string for the LLM
-    and the traversal path (nodes + edges touched) for the live visualization to
+    """Ground a prompt on the project's ontology: find entities whose uid or any
+    property value matches the query, and pull their immediate neighbourhood and
+    stored data values. Returns a context string for the LLM (entities with their
+    properties and relationships — the only facts the agent is allowed to use) and
+    the traversal path (nodes + edges touched) for the live visualization to
     animate. Scoped to the Show Project so traversal stays relevant.
     """
     terms = [t for t in re.findall(r"[A-Za-z0-9]+", query.lower()) if len(t) > 2]
@@ -248,11 +253,12 @@ def retrieve_context(
         records = session.run(
             "MATCH (e:Entity {project_id: $pid}) "
             "WHERE any(t IN $terms WHERE toLower(e.uid) CONTAINS t "
-            "OR toLower(coalesce(e.value, '')) CONTAINS t) "
+            "OR any(k IN keys(e) WHERE toLower(toString(e[k])) CONTAINS t)) "
             "OPTIONAL MATCH (e)-[r]-(n:Entity {project_id: $pid}) "
             "RETURN e.uid AS uid, "
             "[l IN labels(e) WHERE l <> 'Entity'][0] AS label, "
-            "collect(DISTINCT {to: n.uid, type: type(r)})[..5] AS rels "
+            "properties(e) AS props, "
+            "collect(DISTINCT {to: n.uid, type: type(r)})[..6] AS rels "
             "LIMIT $limit",
             terms=terms, pid=project_id, limit=limit,
         ).data()
@@ -263,6 +269,12 @@ def retrieve_context(
     for record in records:
         uid = record["uid"]
         nodes.append(uid)
+        props = {
+            k: v
+            for k, v in (record.get("props") or {}).items()
+            if k not in _INTERNAL_KEYS and str(v).strip() != ""
+        }
+        prop_str = ", ".join(f"{k}={v}" for k, v in props.items())
         related = []
         for rel in record["rels"]:
             if rel.get("to") is None:
@@ -270,8 +282,9 @@ def retrieve_context(
             nodes.append(rel["to"])
             edges.append({"from": uid, "to": rel["to"], "type": rel["type"]})
             related.append(f"{rel['type']} {rel['to']}")
+        detail = f" [{prop_str}]" if prop_str else ""
         suffix = f" ({'; '.join(related)})" if related else ""
-        lines.append(f"- {record['label']} {uid}{suffix}")
+        lines.append(f"- {record['label']} {uid}{detail}{suffix}")
 
     return {
         "context": "\n".join(lines),
@@ -320,4 +333,110 @@ def read_ontology(driver: Driver, project_id: int, limit: int = 250) -> dict:
         "relations": relations,
         "nodes": nodes,
         "edges": edges,
+    }
+
+
+def schema_ontology(driver: Driver, project_id: int) -> dict:
+    """The class-level (schema/TBox) graph for a project: one node per class with
+    its instance count, and class-to-class edges aggregated by relationship type
+    with counts. This is the legible default view — dozens of classes instead of
+    hundreds of instances. Unbounded counts (not capped like the instance graph).
+    """
+    with driver.session() as session:
+        classes = [
+            {"name": r["name"], "count": r["count"]}
+            for r in session.run(
+                "MATCH (e:Entity {project_id: $pid}) "
+                "WITH [l IN labels(e) WHERE l <> 'Entity'][0] AS name "
+                "RETURN name, count(*) AS count ORDER BY count DESC, name",
+                pid=project_id,
+            )
+            if r["name"]
+        ]
+        edges = [
+            {"from": r["from"], "to": r["to"], "type": r["type"], "count": r["count"]}
+            for r in session.run(
+                "MATCH (a:Entity {project_id: $pid})-[r]->(b:Entity {project_id: $pid}) "
+                "WITH [l IN labels(a) WHERE l <> 'Entity'][0] AS frm, "
+                "[l IN labels(b) WHERE l <> 'Entity'][0] AS t, type(r) AS ty "
+                "RETURN frm AS from, t AS to, ty AS type, count(*) AS count "
+                "ORDER BY count DESC",
+                pid=project_id,
+            )
+            if r["from"] and r["to"]
+        ]
+    return {"classes": classes, "edges": edges}
+
+
+def class_instances(
+    driver: Driver, project_id: int, label: str, limit: int = 150
+) -> dict:
+    """The instance subgraph for one class: every entity carrying that class
+    label plus its immediate neighbours and the relationships between them. Used
+    when the user drills into a class from the schema view."""
+    nodes: dict[str, dict] = {}
+    edges: dict[tuple, dict] = {}
+    with driver.session() as session:
+        rows = session.run(
+            "MATCH (e:Entity {project_id: $pid}) WHERE $label IN labels(e) "
+            "OPTIONAL MATCH (e)-[r]-(n:Entity {project_id: $pid}) "
+            "RETURN e.uid AS uid, "
+            "[l IN labels(e) WHERE l <> 'Entity'][0] AS label, "
+            "collect(DISTINCT {to: n.uid, "
+            "toLabel: [l IN labels(n) WHERE l <> 'Entity'][0], "
+            "type: type(r), "
+            "dir: CASE WHEN startNode(r) = e THEN 'out' ELSE 'in' END}) AS rels "
+            "LIMIT $limit",
+            pid=project_id, label=label, limit=limit,
+        )
+        for row in rows:
+            nodes[row["uid"]] = {"uid": row["uid"], "label": row["label"]}
+            for rel in row["rels"]:
+                if not rel.get("to"):
+                    continue
+                nodes.setdefault(
+                    rel["to"],
+                    {"uid": rel["to"], "label": rel["toLabel"] or "Entity"},
+                )
+                if rel["dir"] == "out":
+                    key = (row["uid"], rel["to"], rel["type"])
+                    edges[key] = {
+                        "from": row["uid"], "to": rel["to"], "type": rel["type"]
+                    }
+                else:
+                    key = (rel["to"], row["uid"], rel["type"])
+                    edges[key] = {
+                        "from": rel["to"], "to": row["uid"], "type": rel["type"]
+                    }
+    return {"nodes": list(nodes.values()), "edges": list(edges.values())}
+
+
+def summarize_ontology(driver: Driver, project_id: int) -> dict:
+    """Summarise the ontology layer for a project: how many generated nodes exist
+    per class and how many relationships per type. No graph — just the counts
+    that describe what constitutes the layer."""
+    with driver.session() as session:
+        classes = [
+            {"name": r["name"], "count": r["count"]}
+            for r in session.run(
+                "MATCH (e:Entity {project_id: $pid}) "
+                "WITH [l IN labels(e) WHERE l <> 'Entity'][0] AS name "
+                "RETURN name, count(*) AS count ORDER BY count DESC, name",
+                pid=project_id,
+            )
+            if r["name"]
+        ]
+        relations = [
+            {"name": r["name"], "count": r["count"]}
+            for r in session.run(
+                "MATCH (a:Entity {project_id: $pid})-[r]->(b:Entity {project_id: $pid}) "
+                "RETURN type(r) AS name, count(r) AS count ORDER BY count DESC, name",
+                pid=project_id,
+            )
+        ]
+    return {
+        "classes": classes,
+        "relations": relations,
+        "node_total": sum(c["count"] for c in classes),
+        "relation_total": sum(r["count"] for r in relations),
     }

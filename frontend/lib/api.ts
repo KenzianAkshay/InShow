@@ -57,6 +57,8 @@ export const api = {
       body: JSON.stringify({ name, description }),
     }),
   getProject: (id: number): Promise<ShowProject> => req(`/api/projects/${id}`),
+  describeProject: (id: number): Promise<ProjectDescription> =>
+    req(`/api/projects/${id}/describe`),
   deleteProject: (id: number) => req(`/api/projects/${id}`, { method: "DELETE" }),
   listAgents: (projectId: number): Promise<Agent[]> =>
     req(`/api/agents?project_id=${projectId}`),
@@ -98,6 +100,15 @@ export const api = {
     }),
   getOntology: (projectId: number): Promise<Ontology> =>
     req(`/api/ontology?project_id=${projectId}`),
+  getOntologySchema: (projectId: number): Promise<OntologySchema> =>
+    req(`/api/ontology/schema?project_id=${projectId}`),
+  getClassInstances: (
+    projectId: number,
+    label: string,
+  ): Promise<OntologyInstances> =>
+    req(
+      `/api/ontology/instances?project_id=${projectId}&label=${encodeURIComponent(label)}`,
+    ),
   getMessages: (agentId: number): Promise<ChatMessage[]> =>
     req(`/api/agents/${agentId}/messages`),
   chat: (agentId: number, content: string): Promise<ChatReply> =>
@@ -159,6 +170,44 @@ export type Ontology = {
   relations: string[];
   nodes: OntologyNode[];
   edges: OntologyEdge[];
+};
+
+// Class-level schema graph: one node per class, edges aggregated by type.
+export type OntologySchema = {
+  classes: { name: string; count: number }[];
+  edges: { from: string; to: string; type: string; count: number }[];
+};
+
+// Drill-down: instances of one class plus their neighbours.
+export type OntologyInstances = {
+  nodes: { uid: string; label: string }[];
+  edges: OntologyEdge[];
+};
+
+export type ProjectDescription = {
+  project: { id: number; name: string; description: string };
+  data_sources: {
+    id: number;
+    name: string;
+    type: string;
+    status: string;
+    created_at: string;
+    sheets: { name: string; records: number }[];
+  }[];
+  ontology: {
+    classes: { name: string; count: number }[];
+    relations: { name: string; count: number }[];
+    node_total: number;
+    relation_total: number;
+  };
+  agents: {
+    id: number;
+    name: string;
+    type: string;
+    model_provider: string | null;
+    model_name: string | null;
+    data_source_id: number | null;
+  }[];
 };
 
 export type OntologySummary = {

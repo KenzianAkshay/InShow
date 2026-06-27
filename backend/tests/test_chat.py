@@ -64,6 +64,25 @@ def test_chat_roundtrip(auth, monkeypatch):
     assert history[1]["metadata"]["artifact"]["type"] == "metrics"
 
 
+def test_chat_enforces_strict_grounding(auth, monkeypatch):
+    monkeypatch.setattr(chatmod, "get_provider", lambda *a, **k: _Fake())
+    aid = _agent(
+        auth,
+        model_provider="claude",
+        model_name="claude-opus-4-8",
+        config={"api_key": "sk-x"},
+    )
+    auth.post(
+        f"/api/agents/{aid}/chat",
+        json={"content": "What is the capital of France?"},
+    )
+    # The agent is told to use only the project's ontology/data, not the model's
+    # own knowledge, and that this project has no data to answer from yet.
+    assert "STRICT GROUNDING" in _Fake.system
+    assert "outside or prior knowledge" in _Fake.system
+    assert "no ingested data or ontology yet" in _Fake.system
+
+
 def test_chat_missing_agent(auth, monkeypatch):
     monkeypatch.setattr(chatmod, "get_provider", lambda *a, **k: _Fake())
     assert auth.post("/api/agents/999999/chat", json={"content": "x"}).status_code == 404
