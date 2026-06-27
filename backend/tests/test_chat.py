@@ -83,6 +83,53 @@ def test_chat_enforces_strict_grounding(auth, monkeypatch):
     assert "no ingested data or ontology yet" in _Fake.system
 
 
+def test_agents_delegate_without_key(auth_up):
+    # No model key -> naming a sibling with a delegation verb routes to it.
+    pid = auth_up.post("/api/projects", json={"name": "P"}).json()["id"]
+    a = auth_up.post(
+        "/api/agents",
+        json={"name": "Booth Services", "type": "standard", "show_project_id": pid},
+    ).json()["id"]
+    auth_up.post(
+        "/api/agents",
+        json={"name": "Stats", "type": "standard", "show_project_id": pid},
+    )
+    r = auth_up.post(
+        f"/api/agents/{a}/chat", json={"content": "ask Stats how many exhibitors"}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "Stats" in body["content"]
+    assert "consulted" in body["content"].lower()
+
+
+def test_ask_agent_tool_path(auth_up, monkeypatch):
+    class Delegator(LLMProvider):
+        def complete(self, system, messages):
+            return "noop"
+
+        def complete_with_tools(self, system, messages, tools, dispatch, max_rounds=6):
+            if any(t["name"] == "ask_agent" for t in tools):
+                out = dispatch("ask_agent", {"agent": "Stats", "question": "hi"})
+                return f"Stats says: {out.get('answer') or out.get('error')}"
+            return "leaf"
+
+    monkeypatch.setattr(chatmod, "get_provider", lambda *a, **k: Delegator())
+    pid = auth_up.post("/api/projects", json={"name": "P"}).json()["id"]
+    a = auth_up.post(
+        "/api/agents",
+        json={"name": "Orchestrator", "type": "standard", "show_project_id": pid},
+    ).json()["id"]
+    auth_up.patch(f"/api/agents/{a}", json={"config": {"api_key": "sk-x"}})
+    auth_up.post(
+        "/api/agents",
+        json={"name": "Stats", "type": "standard", "show_project_id": pid},
+    )
+    r = auth_up.post(f"/api/agents/{a}/chat", json={"content": "delegate please"})
+    assert r.status_code == 200
+    assert r.json()["content"].startswith("Stats says:")
+
+
 def test_chat_missing_agent(auth, monkeypatch):
     monkeypatch.setattr(chatmod, "get_provider", lambda *a, **k: _Fake())
     assert auth.post("/api/agents/999999/chat", json={"content": "x"}).status_code == 404

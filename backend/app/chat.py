@@ -48,6 +48,37 @@ CANVAS_GUIDE = (
     "Only include the block when a chart, table, metrics, or map is genuinely useful."
 )
 
+ASK_AGENT_TOOL = {
+    "name": "ask_agent",
+    "description": (
+        "Consult another agent in THIS project by name and get its answer. Use "
+        "when another agent's specialty (e.g. booth layout, a specific data "
+        "domain) fits part of the question. Synthesise its answer into your reply "
+        "and name the agent you consulted."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "agent": {"type": "string", "description": "the other agent's exact name"},
+            "question": {"type": "string", "description": "what to ask that agent"},
+        },
+        "required": ["agent", "question"],
+    },
+}
+
+AGENTS_GUIDE = (
+    "Other agents in this project can help with their specialties. Consult one "
+    "with the `ask_agent` tool when its focus fits part of the question, then "
+    "weave its answer into yours and name the agent you asked. Available agents:\n"
+)
+
+
+def _type_label(t: str) -> str:
+    return {
+        "ontology_creation": "ontology builder",
+        "booth_layout": "booth layout planner",
+    }.get(t, "general analyst")
+
 
 def extract_artifact(text: str) -> tuple[str, dict | None]:
     match = CANVAS_RE.search(text)
@@ -117,7 +148,7 @@ def _ontology_context(request: Request, query: str, project_id: int) -> dict:
         return base
 
 
-def _build_system(config: dict, grounding: dict) -> str:
+def _build_system(config: dict, grounding: dict, peers: list | None = None) -> str:
     """Assemble a strictly-grounded system prompt: the agent may only use the
     project's ontology and ingested data, never outside knowledge."""
     system = "You are an InShow exhibitor-services agent for trade shows."
@@ -159,8 +190,112 @@ def _build_system(config: dict, grounding: dict) -> str:
             "the project's data does not cover it."
         )
 
+    if peers:
+        roster = "\n".join(
+            f"- {p['name']} ({_type_label(p['type'])})"
+            + (f": {_peer_note(p)}" if _peer_note(p) else "")
+            for p in peers
+        )
+        system += "\n\n" + AGENTS_GUIDE + roster
+
     system += "\n\n" + CANVAS_GUIDE
     return system
+
+
+def _peer_note(peer: dict) -> str:
+    try:
+        cfg = peer["config"]
+        cfg = json.loads(cfg) if isinstance(cfg, str) else (cfg or {})
+        return str(cfg.get("ontology_instructions", ""))[:80]
+    except Exception:
+        return ""
+
+
+def _agent_config(row) -> dict:
+    cfg = row["config"]
+    return json.loads(cfg) if isinstance(cfg, str) else (cfg or {})
+
+
+def _peers(project_id, exclude_id: int) -> list[dict]:
+    """Other agents in the same project (potential delegates)."""
+    if project_id is None:
+        return []
+    conn = connect()
+    rows = conn.execute(
+        "SELECT * FROM agents WHERE show_project_id = ? AND id != ? ORDER BY created_at",
+        (project_id, exclude_id),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def _find_sibling(project_id, name: str, exclude_id: int):
+    conn = connect()
+    row = conn.execute(
+        "SELECT * FROM agents WHERE show_project_id = ? AND id != ? "
+        "AND lower(name) = lower(?)",
+        (project_id, exclude_id, (name or "").strip()),
+    ).fetchone()
+    conn.close()
+    return row
+
+
+def _addressed_sibling(peers: list[dict], query: str):
+    """When no LLM is configured, route to a sibling the user explicitly names
+    with a delegation verb (e.g. 'ask Stats how many ...')."""
+    low = f" {query.lower()} "
+    if not any(v in low for v in [" ask ", "consult", "delegate", "check with", " agent "]):
+        return None
+    for p in peers:
+        if p["name"].lower() in low:
+            return p
+    return None
+
+
+def run_subagent(request: Request, agent_row, question: str) -> dict:
+    """Run one sibling agent on a question and return {content, artifact}. The
+    sub-agent uses its own grounding/tools (or the booth pipeline) but cannot
+    delegate further — delegation is capped at one level to prevent recursion."""
+    config = _agent_config(agent_row)
+    if agent_row["type"] == "booth_layout":
+        provider = (
+            get_provider(
+                agent_row["model_provider"], agent_row["model_name"], config.get("api_key")
+            )
+            if _has_key(config)
+            else None
+        )
+        try:
+            res = booth_pipeline.run(
+                provider, agent_row["data_source_id"], question, [], None
+            )
+            return {"content": res["content"], "artifact": res["artifact"]}
+        except Exception:
+            return {"content": "(could not produce a booth layout)", "artifact": None}
+
+    project_id = agent_row["show_project_id"]
+    grounding = _ontology_context(request, question, project_id)
+    system = _build_system(config, grounding)  # no peers -> no further delegation
+    if _has_key(config):
+        try:
+            provider = get_provider(
+                agent_row["model_provider"], agent_row["model_name"], config.get("api_key")
+            )
+            dispatch = analytics.make_dispatch(request.app.state.neo4j, project_id)
+            reply = provider.complete_with_tools(
+                system, [{"role": "user", "content": question}], analytics.TOOLS, dispatch
+            )
+            content, artifact = extract_artifact(reply)
+            return {"content": content, "artifact": artifact}
+        except Exception:
+            pass
+    det = _deterministic(request, project_id, question)
+    if det is not None:
+        return det
+    return {
+        "content": "I don't have enough data in this project to answer that.",
+        "artifact": None,
+    }
 
 
 @router.get("/agents/{agent_id}/messages")
@@ -281,19 +416,29 @@ def chat(
     conn.close()
 
     project_id = agent["show_project_id"]
+    peers = _peers(project_id, agent_id)
     grounding = _ontology_context(request, payload.content, project_id)
-    system = _build_system(config, grounding)
+    system = _build_system(config, grounding, peers)
     messages = [{"role": r["role"], "content": r["content"]} for r in prior]
 
     if _has_key(config):
         provider = get_provider(
             agent["model_provider"], agent["model_name"], config.get("api_key")
         )
-        dispatch = analytics.make_dispatch(request.app.state.neo4j, project_id)
+        base_dispatch = analytics.make_dispatch(request.app.state.neo4j, project_id)
+
+        def dispatch(name: str, args: dict) -> dict:
+            if name == "ask_agent":
+                sib = _find_sibling(project_id, str(args.get("agent", "")), agent_id)
+                if sib is None:
+                    return {"error": f"no agent named '{args.get('agent', '')}' in this project"}
+                sub = run_subagent(request, sib, str(args.get("question", "")))
+                return {"agent": sib["name"], "answer": sub["content"]}
+            return base_dispatch(name, args)
+
+        tools = analytics.TOOLS + ([ASK_AGENT_TOOL] if peers else [])
         try:
-            reply = provider.complete_with_tools(
-                system, messages, analytics.TOOLS, dispatch
-            )
+            reply = provider.complete_with_tools(system, messages, tools, dispatch)
             content, artifact = extract_artifact(reply)
         except Exception as exc:
             # Degrade gracefully: try a deterministic analytic answer before erroring.
@@ -302,18 +447,29 @@ def chat(
                 raise HTTPException(502, f"LLM provider error: {exc}")
             content, artifact = det["content"], det["artifact"]
     else:
-        # No language model configured — answer analytics deterministically.
-        det = _deterministic(request, project_id, payload.content)
-        if det is not None:
-            content, artifact = det["content"], det["artifact"]
+        # No language model configured. If the user explicitly names another
+        # agent, delegate to it; otherwise answer analytics deterministically.
+        sib = _addressed_sibling(peers, payload.content)
+        if sib is not None:
+            sub = run_subagent(request, sib, payload.content)
+            content = f"I consulted **{sib['name']}** — {sub['content']}"
+            artifact = sub["artifact"]
         else:
-            content, artifact = (
-                "No language model is configured for this agent, so I answer "
-                "analytics deterministically. Try a quantitative request like "
-                '"chart exhibitors by city", "how many sponsors", or '
-                '"average booth size".',
-                None,
-            )
+            det = _deterministic(request, project_id, payload.content)
+            if det is not None:
+                content, artifact = det["content"], det["artifact"]
+            else:
+                hint = (
+                    f' or ask another agent, e.g. "ask {peers[0]["name"]} ..."'
+                    if peers
+                    else ""
+                )
+                content, artifact = (
+                    "No language model is configured for this agent, so I answer "
+                    "analytics deterministically. Try a quantitative request like "
+                    '"chart exhibitors by city" or "how many sponsors"' + hint + ".",
+                    None,
+                )
 
     metadata = {"traversal": grounding["traversal"], "artifact": artifact}
     conn = connect()
