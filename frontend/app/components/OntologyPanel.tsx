@@ -19,6 +19,12 @@ const Ontology3D = dynamic(() => import("@/app/components/Ontology3D"), {
   loading: () => <Skeleton className="h-[380px] w-full rounded-none" />,
 });
 
+// The schema map is a lightweight SVG view (no WebGL).
+const OntologySchema2D = dynamic(
+  () => import("@/app/components/OntologySchema2D"),
+  { ssr: false, loading: () => <Skeleton className="h-[380px] w-full rounded-none" /> },
+);
+
 type View =
   | { kind: "schema" }
   | { kind: "class"; label: string; data: OntologyInstances }
@@ -189,16 +195,24 @@ export default function OntologyPanel({
       ) : (
         <>
           <div className="relative min-h-[180px] w-full flex-1">
-            <Ontology3D
-              nodes={gnodes}
-              edges={gedges}
-              activeNodes={activeNodes}
-              alwaysLabels={alwaysLabels}
-              onDrill={onDrill}
-            />
+            {view.kind === "schema" ? (
+              <OntologySchema2D
+                nodes={gnodes}
+                edges={gedges}
+                onDrill={onDrill}
+              />
+            ) : (
+              <Ontology3D
+                nodes={gnodes}
+                edges={gedges}
+                activeNodes={activeNodes}
+                alwaysLabels={alwaysLabels}
+                onDrill={onDrill}
+              />
+            )}
             <span className="pointer-events-none absolute bottom-2 left-3 text-[0.68rem] text-muted-foreground">
               {view.kind === "schema"
-                ? "Class map · click a class to explore its data"
+                ? "Class map · drag to pan · scroll to zoom · click a class to explore"
                 : "Click a node to navigate · scroll to zoom"}
             </span>
           </div>

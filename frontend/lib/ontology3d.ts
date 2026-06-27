@@ -3,8 +3,23 @@ import {
   forceManyBody,
   forceLink,
   forceCenter,
+  forceCollide,
   type SimNode,
 } from "d3-force-3d";
+import * as d3force from "d3-force-3d";
+
+// forceX / forceY exist at runtime but are missing from the package's type
+// declarations; reach them through the module namespace with a typed cast.
+const axisForce = (axis: "forceX" | "forceY", strength: number) => {
+  const f = (
+    d3force as unknown as Record<
+      string,
+      (v: number) => { strength: (s: number) => unknown }
+    >
+  )[axis](0);
+  (f as { strength: (s: number) => unknown }).strength(strength);
+  return f;
+};
 
 export type Vec3 = [number, number, number];
 export type Edge = { from: string; to: string };
@@ -76,6 +91,71 @@ export function compute3DLayout(
       (node.y ?? 0) * scale,
       (node.z ?? 0) * scale,
     ];
+  }
+  return out;
+}
+
+export type Vec2 = [number, number];
+
+/**
+ * Deterministic 2D force-directed layout for the schema (class) map. Uses a
+ * collision force sized to each node's label so classes spread out on a plane
+ * and labels don't pile up — the readable alternative to the 3D ball at 40+
+ * nodes. Returns raw simulation coordinates; the caller frames them to fit.
+ */
+export function compute2DLayout(
+  nodeIds: string[],
+  edges: Edge[],
+  labelWidth: (id: string) => number,
+): Record<string, Vec2> {
+  const out: Record<string, Vec2> = {};
+  const n = nodeIds.length;
+  if (n === 0) return out;
+  if (n === 1) {
+    out[nodeIds[0]] = [0, 0];
+    return out;
+  }
+
+  const index = new Set(nodeIds);
+  const nodes: (SimNode & { id: string })[] = nodeIds.map((id) => ({ id }));
+  const links = edges
+    .filter((e) => index.has(e.from) && index.has(e.to))
+    .map((e) => ({ source: e.from, target: e.to }));
+
+  const spacing = 70 + Math.sqrt(n) * 12;
+
+  // Collision (sized to each node's label) does the spacing so no two nodes or
+  // labels overlap; weak gravity toward the centre gathers disconnected tabs so
+  // the map fills the frame instead of flying apart into tiny far clusters.
+  const collide = forceCollide();
+  (collide as unknown as {
+    radius: (fn: (d: SimNode) => number) => unknown;
+    strength: (s: number) => unknown;
+    iterations: (i: number) => unknown;
+  }).radius((d: SimNode) => labelWidth((d as { id: string }).id));
+  (collide as unknown as { strength: (s: number) => unknown }).strength(0.9);
+  (collide as unknown as { iterations: (i: number) => unknown }).iterations(3);
+
+  const sim = forceSimulation(nodes, 2)
+    .randomSource(seededRandom(1337))
+    .force("charge", forceManyBody().strength(-40))
+    .force(
+      "link",
+      forceLink(links)
+        .id((d: SimNode) => (d as { id: string }).id)
+        .distance(spacing)
+        .strength(0.12),
+    )
+    .force("center", forceCenter(0, 0))
+    .force("x", axisForce("forceX", 0.045) as never)
+    .force("y", axisForce("forceY", 0.045) as never)
+    .force("collide", collide)
+    .stop();
+
+  sim.tick(420);
+
+  for (const node of nodes) {
+    out[node.id] = [node.x ?? 0, node.y ?? 0];
   }
   return out;
 }
