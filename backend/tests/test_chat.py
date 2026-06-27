@@ -110,5 +110,18 @@ def test_chat_provider_error_returns_502(auth, monkeypatch):
             raise RuntimeError("no key")
 
     monkeypatch.setattr(chatmod, "get_provider", lambda *a, **k: Boom())
-    aid = _agent(auth)
+    # With a key the provider is called; its failure (and no deterministic
+    # fallback, since Neo4j is down) surfaces as 502.
+    aid = _agent(auth, config={"api_key": "sk-x"})
     assert auth.post(f"/api/agents/{aid}/chat", json={"content": "x"}).status_code == 502
+
+
+def test_chat_without_key_answers_deterministically(auth_up):
+    # No API key configured -> the agent does not 502; it returns a deterministic
+    # analytics answer (empty under the mock driver -> the guidance message).
+    aid = _agent(auth_up)
+    r = auth_up.post(f"/api/agents/{aid}/chat", json={"content": "chart it"})
+    assert r.status_code == 200
+    body = r.json()
+    assert "deterministically" in body["content"]
+    assert body["artifact"] is None

@@ -1,10 +1,11 @@
 import json
+import os
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from app import booth_pipeline
+from app import analytics, booth_pipeline
 from app.auth import require_user
 from app.db import connect
 from app.llm import get_provider
@@ -21,7 +22,18 @@ GROUNDING_RULES = (
     "values, or relationships that are not present in the provided data. If the "
     "answer is not contained in the ontology and data below, say plainly that the "
     "project's data does not contain that information, and (when useful) point to "
-    "what the ontology does cover. Do not speculate or generalise beyond the data."
+    "what the ontology does cover. Do not speculate or generalise beyond the data. "
+    "You MAY count, aggregate, and compute over this data — that is grounded "
+    "analysis, not speculation."
+)
+
+ANALYTICS_GUIDE = (
+    "You have tools for quantitative work: `query_ontology` runs exact "
+    "aggregations over this project's data (counts per class, group-by a "
+    "dimension, totals, numeric sum/average/min/max), and `calculate` evaluates "
+    "arithmetic exactly. ALWAYS use these tools for numbers and math rather than "
+    "computing in your head, then present the results — and when a chart, table, "
+    "or metric makes the answer clearer, append the canvas block described below."
 )
 
 CANVAS_RE = re.compile(r"```canvas\s*(\{.*?\})\s*```", re.DOTALL)
@@ -72,6 +84,23 @@ def _session_id(conn, agent_id: int, username: str) -> int:
     return cur.lastrowid
 
 
+def _has_key(config: dict) -> bool:
+    return bool(config.get("api_key")) or bool(
+        os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY")
+    )
+
+
+def _deterministic(request: Request, project_id: int, query: str) -> dict | None:
+    """Compute a chart/aggregation answer with no LLM (used when no API key is
+    configured, or as a fallback when the provider errors)."""
+    try:
+        driver = request.app.state.neo4j
+        driver.verify_connectivity()
+        return analytics.deterministic_analytics(driver, project_id, query)
+    except Exception:
+        return None
+
+
 def _ontology_context(request: Request, query: str, project_id: int) -> dict:
     """Gather everything the agent is allowed to reason over: a high-level
     overview of the project's ontology (so it knows the universe of entities even
@@ -95,6 +124,7 @@ def _build_system(config: dict, grounding: dict) -> str:
     if config.get("ontology_instructions"):
         system += "\n\n" + config["ontology_instructions"]
     system += "\n\n" + GROUNDING_RULES
+    system += "\n\n" + ANALYTICS_GUIDE
 
     overview = grounding.get("overview")
     if overview and overview.get("node_total"):
@@ -250,19 +280,41 @@ def chat(
 
     conn.close()
 
-    grounding = _ontology_context(request, payload.content, agent["show_project_id"])
+    project_id = agent["show_project_id"]
+    grounding = _ontology_context(request, payload.content, project_id)
     system = _build_system(config, grounding)
-
     messages = [{"role": r["role"], "content": r["content"]} for r in prior]
-    provider = get_provider(
-        agent["model_provider"], agent["model_name"], config.get("api_key")
-    )
-    try:
-        reply = provider.complete(system, messages)
-    except Exception as exc:
-        raise HTTPException(502, f"LLM provider error: {exc}")
 
-    content, artifact = extract_artifact(reply)
+    if _has_key(config):
+        provider = get_provider(
+            agent["model_provider"], agent["model_name"], config.get("api_key")
+        )
+        dispatch = analytics.make_dispatch(request.app.state.neo4j, project_id)
+        try:
+            reply = provider.complete_with_tools(
+                system, messages, analytics.TOOLS, dispatch
+            )
+            content, artifact = extract_artifact(reply)
+        except Exception as exc:
+            # Degrade gracefully: try a deterministic analytic answer before erroring.
+            det = _deterministic(request, project_id, payload.content)
+            if det is None:
+                raise HTTPException(502, f"LLM provider error: {exc}")
+            content, artifact = det["content"], det["artifact"]
+    else:
+        # No language model configured — answer analytics deterministically.
+        det = _deterministic(request, project_id, payload.content)
+        if det is not None:
+            content, artifact = det["content"], det["artifact"]
+        else:
+            content, artifact = (
+                "No language model is configured for this agent, so I answer "
+                "analytics deterministically. Try a quantitative request like "
+                '"chart exhibitors by city", "how many sponsors", or '
+                '"average booth size".',
+                None,
+            )
+
     metadata = {"traversal": grounding["traversal"], "artifact": artifact}
     conn = connect()
     conn.execute(
