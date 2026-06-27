@@ -27,8 +27,7 @@ const OntologySchema2D = dynamic(
 
 type View =
   | { kind: "schema" }
-  | { kind: "class"; label: string; data: OntologyInstances }
-  | { kind: "traversal" };
+  | { kind: "class"; label: string; data: OntologyInstances };
 
 function classOf(uid: string): string {
   const i = uid.indexOf(":");
@@ -61,13 +60,13 @@ export default function OntologyPanel({
       .catch(() => setSchema(null));
   }, [projectId]);
 
-  // A new chat traversal switches to the traversal view and reveals the path
-  // one hop at a time.
+  // A new chat traversal returns to the schema map and lights up the classes it
+  // touched, revealed one hop at a time.
   const pathNodes = useMemo(() => traversal?.nodes ?? [], [traversal]);
   const traversalKey = JSON.stringify(pathNodes);
   useEffect(() => {
     if (pathNodes.length === 0) return;
-    setView({ kind: "traversal" });
+    setView({ kind: "schema" });
     setStep(0);
     const timer = setInterval(() => {
       setStep((s) => {
@@ -97,19 +96,6 @@ export default function OntologyPanel({
     alwaysLabels: boolean;
     onDrill?: (id: string) => void;
   }>(() => {
-    if (view.kind === "traversal") {
-      const gnodes = pathNodes.map((uid) => ({
-        id: uid,
-        label: displayName(uid),
-        color: colorForLabel(classOf(uid)),
-        size: 0.42,
-      }));
-      return {
-        gnodes,
-        gedges: traversal?.edges ?? [],
-        alwaysLabels: gnodes.length <= 25,
-      };
-    }
     if (view.kind === "class") {
       const gnodes = view.data.nodes.map((n) => ({
         id: n.uid,
@@ -138,13 +124,15 @@ export default function OntologyPanel({
     };
   }, [view, schema, traversalKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const activeNodes = useMemo(
-    () =>
-      view.kind === "traversal"
-        ? new Set(pathNodes.slice(0, step))
-        : new Set<string>(),
-    [view, pathNodes, step],
-  );
+  // Reveal the traversal: instance uids in the drill view, their classes in the
+  // schema map (schema-level traversal).
+  const activeNodes = useMemo(() => {
+    const revealed = pathNodes.slice(0, step);
+    if (revealed.length === 0) return new Set<string>();
+    return view.kind === "class"
+      ? new Set(revealed)
+      : new Set(revealed.map(classOf));
+  }, [view, pathNodes, step]);
 
   const classCount = schema?.classes.length ?? 0;
   const relCount = schema?.edges.length ?? 0;
@@ -153,8 +141,8 @@ export default function OntologyPanel({
   const header =
     view.kind === "class"
       ? `${view.label} · ${gnodes.length} shown`
-      : view.kind === "traversal"
-        ? `Chat traversal · ${pathNodes.length} nodes`
+      : activeNodes.size > 0
+        ? `traversal · ${activeNodes.size} classes lit`
         : `${classCount} classes · ${relCount} relationship types`;
 
   return (
@@ -200,6 +188,7 @@ export default function OntologyPanel({
                 nodes={gnodes}
                 edges={gedges}
                 onDrill={onDrill}
+                activeNodes={activeNodes}
               />
             ) : (
               <Ontology3D

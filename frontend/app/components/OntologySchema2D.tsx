@@ -46,11 +46,14 @@ export default function OntologySchema2D({
   nodes,
   edges,
   onDrill,
+  activeNodes,
 }: {
   nodes: GNode[];
   edges: GEdge[];
   onDrill?: (id: string) => void;
+  activeNodes?: Set<string>;
 }) {
+  const hasActive = (activeNodes?.size ?? 0) > 0;
   const svgRef = useRef<SVGSVGElement>(null);
   const [hovered, setHovered] = useState<string | null>(null);
   const [showAllLabels, setShowAllLabels] = useState(false);
@@ -208,9 +211,15 @@ export default function OntologySchema2D({
             const a = pos[e.from];
             const b = pos[e.to];
             if (!a || !b) return null;
-            const lit =
+            const incident =
               !!hovered && (e.from === hovered || e.to === hovered);
-            const dim = !!hovered && !lit;
+            const activeEdge =
+              hasActive &&
+              !!activeNodes &&
+              activeNodes.has(e.from) &&
+              activeNodes.has(e.to);
+            const lit = incident || activeEdge;
+            const dim = hovered ? !incident : hasActive ? !activeEdge : false;
             const rb = radiusFor(nodes.find((n) => n.id === e.to)?.count);
             const ra = radiusFor(nodes.find((n) => n.id === e.from)?.count);
             const dx = b.x - a.x;
@@ -264,11 +273,17 @@ export default function OntologySchema2D({
             if (!p) return null;
             const r = radiusFor(n.count);
             const isHover = n.id === hovered;
-            const dim = !!neighbours && !neighbours.has(n.id);
+            const isActive = activeNodes?.has(n.id) ?? false;
+            const highlight = isHover || isActive;
+            const dim = hovered
+              ? !!neighbours && !neighbours.has(n.id)
+              : hasActive
+                ? !isActive
+                : false;
             return (
               <g
                 key={n.id}
-                opacity={dim ? 0.25 : 1}
+                opacity={dim ? 0.22 : 1}
                 style={{ cursor: onDrill ? "pointer" : "default" }}
                 onPointerEnter={() => setHovered(n.id)}
                 onPointerLeave={() => setHovered((h) => (h === n.id ? null : h))}
@@ -277,13 +292,23 @@ export default function OntologySchema2D({
                   onDrill?.(n.id);
                 }}
               >
+                {isActive && (
+                  <circle
+                    className="animate-pulse"
+                    cx={p.x}
+                    cy={p.y}
+                    r={r + 6}
+                    fill="#ff7a59"
+                    opacity={0.3}
+                  />
+                )}
                 <circle
                   cx={p.x}
                   cy={p.y}
                   r={r}
-                  fill={n.color}
-                  stroke={isHover ? "#ff7a59" : "var(--background)"}
-                  strokeWidth={isHover ? 3 : 1.5}
+                  fill={isActive ? "#ff7a59" : n.color}
+                  stroke={highlight ? "#ff7a59" : "var(--background)"}
+                  strokeWidth={highlight ? 3 : 1.5}
                 />
                 <text
                   x={p.x}
