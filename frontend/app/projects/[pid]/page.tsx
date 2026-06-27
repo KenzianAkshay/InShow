@@ -3,8 +3,8 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { motion } from "framer-motion";
-import { ArrowRight, Bot, Layers, Plus } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { ArrowRight, Bot, Layers, Plus, Trash2, TriangleAlert } from "lucide-react";
 import { api, Agent, ShowProject } from "@/lib/api";
 import AgentRibbon from "@/app/components/AgentRibbon";
 import ProjectDescribe from "@/app/components/ProjectDescribe";
@@ -21,6 +21,8 @@ export default function ProjectDetail() {
   const [name, setName] = useState("");
   const [type, setType] = useState("standard");
   const [describing, setDescribing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     api.getProject(projectId).then(setProject).catch(() => router.push("/"));
@@ -35,6 +37,16 @@ export default function ProjectDetail() {
     router.push(`/agents/${agent.id}`);
   }
 
+  async function removeProject() {
+    setDeleting(true);
+    try {
+      await api.deleteProject(projectId);
+      router.push("/");
+    } catch {
+      setDeleting(false);
+    }
+  }
+
   if (!project) return null;
 
   return (
@@ -46,10 +58,20 @@ export default function ProjectDetail() {
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h1 className="text-3xl font-bold tracking-tight">{project.name}</h1>
-          <Button variant="secondary" onClick={() => setDescribing(true)}>
-            <Layers className="size-4" />
-            Describe Project
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" onClick={() => setDescribing(true)}>
+              <Layers className="size-4" />
+              Describe Project
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmDelete(true)}
+              className="text-destructive"
+            >
+              <Trash2 className="size-4" />
+              Delete project
+            </Button>
+          </div>
         </div>
         <p className="mt-2 max-w-prose text-sm text-muted-foreground">
           Agents in this show share one evolving ontology. Build it from any
@@ -63,6 +85,61 @@ export default function ProjectDetail() {
           onClose={() => setDescribing(false)}
         />
       )}
+
+      <AnimatePresence>
+        {confirmDelete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm"
+            onClick={() => !deleting && setConfirmDelete(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              onClick={(e) => e.stopPropagation()}
+              className="glass w-full max-w-md p-6"
+            >
+              <div className="flex items-center gap-3">
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-destructive/15 text-destructive">
+                  <TriangleAlert className="size-5" />
+                </span>
+                <div>
+                  <h2 className="text-lg font-bold tracking-tight">
+                    Delete this project?
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    &ldquo;{project.name}&rdquo;
+                  </p>
+                </div>
+              </div>
+              <p className="mt-4 text-sm text-muted-foreground">
+                This permanently removes the project and all of its agents. This
+                cannot be undone.
+              </p>
+              <div className="mt-6 flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setConfirmDelete(false)}
+                  disabled={deleting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={removeProject}
+                  disabled={deleting}
+                  className="bg-destructive text-white hover:bg-destructive/90"
+                >
+                  <Trash2 className="size-4" />
+                  {deleting ? "Deleting…" : "Delete project"}
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="mt-6">
         <AgentRibbon projectId={projectId} />

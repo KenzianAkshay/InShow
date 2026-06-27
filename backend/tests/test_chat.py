@@ -88,6 +88,22 @@ def test_chat_missing_agent(auth, monkeypatch):
     assert auth.post("/api/agents/999999/chat", json={"content": "x"}).status_code == 404
 
 
+def test_clear_messages(auth, monkeypatch):
+    monkeypatch.setattr(chatmod, "get_provider", lambda *a, **k: _Fake())
+    aid = _agent(auth, config={"api_key": "sk-x"})
+    auth.post(f"/api/agents/{aid}/chat", json={"content": "hi"})
+    assert len(auth.get(f"/api/agents/{aid}/messages").json()) == 2
+
+    assert auth.delete(f"/api/agents/{aid}/messages").status_code == 204
+    assert auth.get(f"/api/agents/{aid}/messages").json() == []
+
+    assert auth.delete("/api/agents/999999/messages").status_code == 404
+
+
+def test_clear_messages_requires_auth(client):
+    assert client.delete("/api/agents/1/messages").status_code == 401
+
+
 def test_chat_provider_error_returns_502(auth, monkeypatch):
     class Boom(LLMProvider):
         def complete(self, system, messages):

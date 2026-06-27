@@ -154,6 +154,25 @@ def history(agent_id: int):
     ]
 
 
+@router.delete("/agents/{agent_id}/messages", status_code=204)
+def clear_messages(agent_id: int):
+    """Clear an agent's chat history (all messages across its sessions)."""
+    conn = connect()
+    agent = conn.execute(
+        "SELECT id FROM agents WHERE id = ?", (agent_id,)
+    ).fetchone()
+    if agent is None:
+        conn.close()
+        raise HTTPException(404, "Agent not found")
+    conn.execute(
+        "DELETE FROM messages WHERE session_id IN "
+        "(SELECT id FROM chat_sessions WHERE agent_id = ?)",
+        (agent_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
 @router.post("/agents/{agent_id}/chat")
 def chat(
     agent_id: int,

@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Panel, PanelGroup } from "react-resizable-panels";
-import { Network, SendHorizonal, Sparkles } from "lucide-react";
+import { Network, SendHorizonal, Sparkles, Trash2 } from "lucide-react";
 import { api, Artifact, ChatMessage, Traversal } from "@/lib/api";
 import OntologyPanel from "@/app/components/OntologyPanel";
 import Canvas from "@/app/components/Canvas";
@@ -94,8 +94,27 @@ export default function Chat() {
     }
   }
 
+  async function clearChat() {
+    setMessages([]);
+    setTraversal(null);
+    setArtifact(null);
+    await api.clearMessages(agentId).catch(() => {});
+  }
+
   const chatPane = (
     <section className="glass flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="flex shrink-0 items-center justify-between border-b border-border/70 px-4 py-2.5">
+        <span className="text-sm font-semibold">Conversation</span>
+        <button
+          type="button"
+          onClick={clearChat}
+          disabled={messages.length === 0}
+          className="ring-focus inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-destructive disabled:pointer-events-none disabled:opacity-40"
+        >
+          <Trash2 className="size-3.5" />
+          Clear chat
+        </button>
+      </div>
       <div className="flex-1 space-y-3 overflow-y-auto p-4">
         {messages.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center text-center text-muted-foreground">

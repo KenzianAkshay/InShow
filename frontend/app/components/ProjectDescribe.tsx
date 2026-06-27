@@ -5,7 +5,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Bot,
   Boxes,
+  Building2,
+  Check,
   ChevronDown,
+  Cloud,
   Cpu,
   Database,
   FileJson,
@@ -14,7 +17,10 @@ import {
   Layers,
   LayoutPanelTop,
   Network,
+  Plug,
+  Server,
   Share2,
+  Snowflake,
   Spline,
   Table2,
   X,
@@ -36,6 +42,19 @@ function agentMeta(type: string): { Icon: typeof Bot; label: string } {
   if (type === "booth_layout") return { Icon: LayoutPanelTop, label: "Booth Layout" };
   return { Icon: Bot, label: "Standard" };
 }
+
+// Showcase-only external connectors. Selecting one is a visual demo — no real
+// connection is made and no data is ingested.
+const CONNECTORS: { name: string; category: string; icon: typeof Bot; color: string }[] = [
+  { name: "Microsoft Fabric", category: "Lakehouse", icon: Cloud, color: "#0a7d6c" },
+  { name: "Salesforce", category: "CRM", icon: Cloud, color: "#00a1e0" },
+  { name: "Oracle", category: "Database", icon: Database, color: "#c74634" },
+  { name: "Workday", category: "HCM", icon: Building2, color: "#0875e1" },
+  { name: "Sage X3", category: "ERP", icon: Boxes, color: "#00a36a" },
+  { name: "SAP", category: "ERP", icon: Server, color: "#0faaff" },
+  { name: "Snowflake", category: "Warehouse", icon: Snowflake, color: "#29b5e8" },
+  { name: "Google BigQuery", category: "Warehouse", icon: Database, color: "#4285f4" },
+];
 
 type DsItem = {
   key: string;
@@ -157,6 +176,8 @@ function CountChip({
 export default function ProjectDescribe({ projectId, onClose }: Props) {
   const [data, setData] = useState<ProjectDescription | null>(null);
   const [error, setError] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [connected, setConnected] = useState<string[]>([]);
 
   useEffect(() => {
     api.describeProject(projectId).then(setData).catch(() => setError(true));
@@ -346,7 +367,17 @@ export default function ProjectDescribe({ projectId, onClose }: Props) {
                       subtitle={subtitle}
                       accent={ACCENT.data}
                     >
-                      {items.length === 0 ? (
+                      <div className="mb-3 flex items-center justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setConnecting(true)}
+                          className="ring-focus inline-flex items-center gap-1.5 rounded-lg border border-border bg-[var(--glass-bg)] px-2.5 py-1.5 text-xs font-semibold text-muted-foreground backdrop-blur-md transition-colors hover:text-foreground"
+                        >
+                          <Plug className="size-3.5" />
+                          Connect external source
+                        </button>
+                      </div>
+                      {items.length === 0 && connected.length === 0 ? (
                         <p className="text-sm text-muted-foreground">
                           No data ingested yet.
                         </p>
@@ -395,6 +426,35 @@ export default function ProjectDescribe({ projectId, onClose }: Props) {
                               </div>
                             );
                           })}
+                          {connected.map((cname) => {
+                            const c = CONNECTORS.find((x) => x.name === cname);
+                            if (!c) return null;
+                            const Icon = c.icon;
+                            return (
+                              <div
+                                key={`ext:${cname}`}
+                                className="flex items-center gap-3 rounded-[var(--radius-md)] border border-dashed border-border bg-[var(--glass-bg)] p-3 backdrop-blur-md"
+                              >
+                                <span
+                                  className="grid size-9 shrink-0 place-items-center rounded-lg"
+                                  style={{ background: `${c.color}1f`, color: c.color }}
+                                >
+                                  <Icon className="size-4" />
+                                </span>
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-semibold">
+                                    {cname}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                    <span>{c.category}</span>
+                                    <span className="shrink-0 rounded-full bg-secondary px-1.5 py-0.5 text-[0.68rem] font-medium">
+                                      demo
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </Layer>
@@ -403,6 +463,106 @@ export default function ProjectDescribe({ projectId, onClose }: Props) {
               </>
             )}
           </div>
+
+          {/* External connector picker — showcase only, no real connection */}
+          <AnimatePresence>
+            {connecting && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[60] flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm"
+                onClick={() => setConnecting(false)}
+              >
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.97, y: 12 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.97, y: 12 }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="glass w-full max-w-lg p-5"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <span className="grid size-10 place-items-center rounded-xl bg-[var(--accent)]/15 text-accent">
+                        <Plug className="size-5" />
+                      </span>
+                      <div>
+                        <h3 className="text-base font-bold tracking-tight">
+                          Connect an external source
+                        </h3>
+                        <p className="text-xs text-muted-foreground">
+                          Showcase only — selecting a connector is a demo; no
+                          data is ingested.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setConnecting(false)}
+                      aria-label="Close"
+                      className="ring-focus grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                    {CONNECTORS.map((c) => {
+                      const Icon = c.icon;
+                      const isOn = connected.includes(c.name);
+                      return (
+                        <button
+                          key={c.name}
+                          type="button"
+                          onClick={() =>
+                            setConnected((prev) =>
+                              prev.includes(c.name)
+                                ? prev.filter((n) => n !== c.name)
+                                : [...prev, c.name],
+                            )
+                          }
+                          className="ring-focus relative flex flex-col items-center gap-2 rounded-[var(--radius-md)] border border-border bg-[var(--glass-bg)] p-3 text-center backdrop-blur-md transition-transform hover:-translate-y-0.5"
+                          style={isOn ? { borderColor: c.color } : undefined}
+                        >
+                          {isOn && (
+                            <span
+                              className="absolute right-1.5 top-1.5 grid size-4 place-items-center rounded-full text-white"
+                              style={{ background: c.color }}
+                            >
+                              <Check className="size-3" />
+                            </span>
+                          )}
+                          <span
+                            className="grid size-9 place-items-center rounded-lg"
+                            style={{ background: `${c.color}1f`, color: c.color }}
+                          >
+                            <Icon className="size-4" />
+                          </span>
+                          <span className="text-xs font-semibold leading-tight">
+                            {c.name}
+                          </span>
+                          <span className="text-[0.66rem] uppercase tracking-wide text-muted-foreground">
+                            {c.category}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <span className="text-xs text-muted-foreground">
+                      {connected.length} connected (demo)
+                    </span>
+                    <button
+                      onClick={() => setConnecting(false)}
+                      className="ring-focus rounded-lg bg-[linear-gradient(180deg,#ff9678,#ff7a59_55%,#ef5f3d)] px-3 py-1.5 text-sm font-semibold text-white"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
       </motion.div>
     </AnimatePresence>

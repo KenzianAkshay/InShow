@@ -111,6 +111,8 @@ export const api = {
     ),
   getMessages: (agentId: number): Promise<ChatMessage[]> =>
     req(`/api/agents/${agentId}/messages`),
+  clearMessages: (agentId: number) =>
+    req(`/api/agents/${agentId}/messages`, { method: "DELETE" }),
   chat: (agentId: number, content: string): Promise<ChatReply> =>
     req(`/api/agents/${agentId}/chat`, {
       method: "POST",
