@@ -82,7 +82,9 @@ export default function BoothLayout2D({ artifact }: { artifact: Booth }) {
           const y = flipY(z.y, z.h);
           const w = px(z.w);
           const h = px(z.h);
-          const small = w < 58 || h < 34;
+          const small = w < 64 || h < 36;
+          const tiny = w < 46 || h < 26;
+          const nameSize = small ? 8.5 : w < 96 ? 9.5 : 11;
           return (
             <g key={z.id}>
               <rect
@@ -97,32 +99,49 @@ export default function BoothLayout2D({ artifact }: { artifact: Booth }) {
                 strokeOpacity={0.5}
                 strokeWidth={1}
               />
-              <text
-                x={x + w / 2}
-                y={y + h / 2 - (small ? 0 : 5)}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fontSize={small ? 8.5 : 11}
-                fontWeight={600}
-                fill="#ffffff"
+              {/* Labels via foreignObject so long names wrap and clip inside
+                  the box instead of overflowing as single-line SVG text. */}
+              <foreignObject
+                x={x}
+                y={y}
+                width={w}
+                height={h}
                 style={{ pointerEvents: "none" }}
               >
-                {z.name}
-              </text>
-              {!small && (
-                <text
-                  x={x + w / 2}
-                  y={y + h / 2 + 9}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  fontSize={8.5}
-                  fill="#ffffff"
-                  fillOpacity={0.85}
-                  style={{ pointerEvents: "none" }}
+                <div
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    textAlign: "center",
+                    gap: 1,
+                    padding: "2px 3px",
+                    boxSizing: "border-box",
+                    overflow: "hidden",
+                    color: "#ffffff",
+                    lineHeight: 1.05,
+                  }}
                 >
-                  {z.w}×{z.h} m
-                </text>
-              )}
+                  <span
+                    style={{
+                      fontSize: nameSize,
+                      fontWeight: 600,
+                      wordBreak: "break-word",
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {z.name}
+                  </span>
+                  {!tiny && (
+                    <span style={{ fontSize: 8, opacity: 0.85, whiteSpace: "nowrap" }}>
+                      {z.w}×{z.h} m
+                    </span>
+                  )}
+                </div>
+              </foreignObject>
             </g>
           );
         })}

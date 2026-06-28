@@ -61,9 +61,8 @@ export default function Chat() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  async function send(e: FormEvent) {
-    e.preventDefault();
-    const content = input.trim();
+  async function sendMessage(raw: string) {
+    const content = raw.trim();
     if (!content || sending) return;
     setInput("");
     setError(null);
@@ -81,7 +80,10 @@ export default function Chat() {
         {
           role: "assistant",
           content: reply.content,
-          metadata: { traversal: reply.traversal },
+          metadata: {
+            traversal: reply.traversal,
+            suggestions: reply.suggestions,
+          },
           created_at: "",
         },
       ]);
@@ -92,6 +94,11 @@ export default function Chat() {
     } finally {
       setSending(false);
     }
+  }
+
+  function send(e: FormEvent) {
+    e.preventDefault();
+    sendMessage(input);
   }
 
   async function clearChat() {
@@ -167,6 +174,26 @@ export default function Chat() {
             </motion.p>
           )}
         </AnimatePresence>
+        {(() => {
+          const last = messages[messages.length - 1];
+          const suggestions =
+            last?.role === "assistant" ? last.metadata?.suggestions : null;
+          if (!suggestions?.length || sending) return null;
+          return (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {suggestions.map((s, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => sendMessage(s)}
+                  className="ring-focus rounded-full border border-border bg-secondary/60 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-accent hover:text-accent"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          );
+        })()}
         {error && <p className="text-sm font-medium text-destructive">{error}</p>}
         <div ref={endRef} />
       </div>

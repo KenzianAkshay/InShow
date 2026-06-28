@@ -337,13 +337,91 @@ def _missing_goals(spec: dict) -> list[str]:
     return missing
 
 
-def _goal_questions(missing: list[str]) -> str:
-    lead = (
-        "Happy to plan your stand. To get the layout right, could you tell me "
-        + ("a couple of things" if len(missing) > 1 else "one thing")
-        + ":\n"
+# Pretty labels for clickable answer options.
+_ZONE_LABEL = {
+    "reception": "Reception", "demo": "Demo station", "meeting": "Meeting room",
+    "storage": "Storage", "display": "Display wall", "lounge": "Lounge",
+    "cafe": "Café", "counter": "Counter", "info": "Info desk", "product": "Product feature",
+}
+_ZONE_PHRASE = {
+    "reception": "a reception", "demo": "2 demo stations", "meeting": "a meeting room",
+    "storage": "storage", "display": "a display wall", "lounge": "a lounge",
+    "cafe": "a café", "counter": "a counter", "info": "an info desk",
+    "product": "a product feature",
+}
+_COMMON_SIZES = ["3×3 m", "6×4 m", "8×6 m", "10×10 m"]
+_TYPES = ["Inline", "Corner", "Peninsula", "Island"]
+
+
+def _catalog_kinds(catalog: dict) -> list[str]:
+    """Zone kinds available in the uploaded catalog, highest-priority first."""
+    return sorted(
+        (catalog.get("by_kind") or {}).keys(), key=lambda k: -PRIORITY.get(k, 2)
     )
-    return lead + "\n".join(f"• {m}" for m in missing)
+
+
+def _zone_phrase(kind: str) -> str:
+    return _ZONE_PHRASE.get(kind, f"a {kind}")
+
+
+def _ask_next(spec: dict, catalog: dict) -> tuple[str, list[str]]:
+    """Ask for the first missing goal, offering answer options drawn from the
+    ingested catalog so the user can pick rather than type."""
+    if not spec.get("dims"):
+        opts: list[str] = []
+        meta = catalog.get("booth_meta")
+        if meta and meta.get("width") and meta.get("depth"):
+            opts.append(f"{meta['width']:g}×{meta['depth']:g} m")
+        opts += [s for s in _COMMON_SIZES if s not in opts]
+        return (
+            "Happy to plan your stand! First, what's the booth footprint "
+            "(width × depth)?",
+            opts,
+        )
+    if not spec.get("type"):
+        meta = catalog.get("booth_meta") or {}
+        types = list(_TYPES)
+        if meta.get("type"):
+            t = meta["type"].title()
+            types = [t] + [x for x in types if x.lower() != meta["type"].lower()]
+        return ("Got it. What booth type is it?", types)
+
+    kinds = _catalog_kinds(catalog)
+    if kinds:
+        preset = ", ".join(_zone_phrase(k) for k in kinds[:4])
+        opts = [preset] + [_ZONE_LABEL.get(k, k.title()) for k in kinds[:6]]
+        note = " Your catalog includes: " + ", ".join(kinds) + "."
+    else:
+        preset = "a reception, 2 demo stations, a meeting room, storage"
+        opts = [preset, "Reception", "Demo station", "Meeting room", "Storage", "Lounge"]
+        note = ""
+    return (
+        "Great — which zones would you like? Choose a starter set or list your "
+        "own." + note,
+        opts,
+    )
+
+
+def _starter_suggestions(catalog: dict) -> list[str]:
+    kinds = _catalog_kinds(catalog) or [z["kind"] for z in DEFAULT_ZONES]
+    preset = ", ".join(_zone_phrase(k) for k in kinds[:4])
+    return [f"Plan a 6×4 corner booth with {preset}", "6×4 corner booth", "8×6 island booth"]
+
+
+def _edit_suggestions(program: dict, catalog: dict) -> list[str]:
+    present = {z["kind"] for z in program.get("zones", [])}
+    fresh = [k for k in _catalog_kinds(catalog) if k not in present]
+    opts: list[str] = []
+    if fresh:
+        opts.append(f"add {_zone_phrase(fresh[0])}")
+    opts += ["add a demo station", "move the meeting room to the back", "make it an 8×6 island"]
+    seen: set[str] = set()
+    out: list[str] = []
+    for o in opts:
+        if o not in seen:
+            out.append(o)
+            seen.add(o)
+    return out[:4]
 
 
 def _program_from_spec(spec: dict, catalog: dict) -> dict:
@@ -358,43 +436,6 @@ def _program_from_spec(spec: dict, catalog: dict) -> dict:
         "constraints": {},
     }
     return _normalise_program(program, catalog)
-
-
-def _llm_program_or_question(
-    provider: LLMProvider, message: str, history: list[dict], catalog: dict
-) -> dict:
-    """Ask the model to either emit a program or, if booth size / type / zones
-    are unspecified, ask a brief clarifying question instead."""
-    kinds = ", ".join(sorted(ZONE_KINDS))
-    sizes = json.dumps(catalog["by_kind"]) if catalog["by_kind"] else "(none provided)"
-    system = (
-        "You convert a trade-show exhibitor's request into a booth layout. "
-        "If the request is missing the booth size, the booth type, or which zones "
-        "to include, ask a brief, friendly clarifying question for ONLY the missing "
-        "details and do NOT emit a program. Otherwise reply with ONLY one fenced "
-        "```program {JSON}``` block (no prose). Schema:\n"
-        '{"booth":{"width":<m>,"depth":<m>,"type":"inline|corner|peninsula|island"},'
-        '"zones":[{"name":"...","kind":"<one of: ' + kinds + '>","count":<int>,'
-        '"priority":<1-5>}],"constraints":{"aisle_width":<m>,"max_height":<m>}}\n'
-        f"Available element sizes from the catalog: {sizes}"
-    )
-    msgs = [{"role": m["role"], "content": m["content"]} for m in history]
-    msgs.append({"role": "user", "content": message})
-    reply = provider.complete(system, msgs)
-    match = PROGRAM_RE.search(reply)
-    if match:
-        try:
-            program = json.loads(match.group(1))
-            if isinstance(program, dict) and "zones" in program:
-                return {"kind": "plan", "program": _normalise_program(program, catalog)}
-        except json.JSONDecodeError:
-            pass
-    text = PROGRAM_RE.sub("", reply).strip()
-    return {
-        "kind": "question",
-        "text": text
-        or "Could you share the booth size, type, and the zones you'd like to include?",
-    }
 
 
 # --------------------------------------------------------------------------- #
@@ -472,41 +513,32 @@ def run(
     real_prev = None if is_draft else prev_program
 
     if real_prev is None:
-        # First layout (or still gathering goals): plan only when booth size, type
-        # and zones are known — otherwise ask for the missing details.
-        program = None
-        if provider is not None:
-            try:
-                outcome = _llm_program_or_question(provider, message, history, catalog)
-            except Exception:
-                outcome = None
-            if outcome is not None:
-                if outcome["kind"] == "question":
-                    return {
-                        "content": outcome["text"],
-                        "artifact": None,
-                        "program": {"_draft": True},
-                    }
-                program = outcome["program"]
-        if program is None:
-            spec = _merge_spec(draft, message, catalog)
-            has_any = bool(spec["dims"] or spec["type"] or spec["zones"])
-            if not has_any:
-                social = conversation.social_reply(message, booth=True)
-                if social is not None:
-                    return {
-                        "content": social,
-                        "artifact": None,
-                        "program": {"_draft": True, **spec},
-                    }
-            missing = _missing_goals(spec)
-            if missing:
+        # First layout: gather goals deterministically — one at a time, with
+        # answer options drawn from the catalog — so the offered choices always
+        # match the question being asked and answers accumulate across turns.
+        # (The LLM is used only to explain the finished layout and to handle
+        # edits, never to free-form the goal questions, which previously caused
+        # mismatched options and loops.)
+        spec = _merge_spec(draft, message, catalog)
+        has_any = bool(spec["dims"] or spec["type"] or spec["zones"])
+        if not has_any:
+            social = conversation.social_reply(message, booth=True)
+            if social is not None:
                 return {
-                    "content": _goal_questions(missing),
+                    "content": social,
                     "artifact": None,
                     "program": {"_draft": True, **spec},
+                    "suggestions": _starter_suggestions(catalog),
                 }
-            program = _program_from_spec(spec, catalog)
+        if _missing_goals(spec):
+            content, suggestions = _ask_next(spec, catalog)
+            return {
+                "content": content,
+                "artifact": None,
+                "program": {"_draft": True, **spec},
+                "suggestions": suggestions,
+            }
+        program = _program_from_spec(spec, catalog)
     else:
         # Iterating on an existing layout.
         program = synthesise(provider, message, history, real_prev, catalog)
@@ -514,4 +546,9 @@ def run(
     result = plan_layout(program)
     artifact = to_artifact(program, result)
     content = explain(provider, program, result)
-    return {"content": content, "artifact": artifact, "program": program}
+    return {
+        "content": content,
+        "artifact": artifact,
+        "program": program,
+        "suggestions": _edit_suggestions(program, catalog),
+    }

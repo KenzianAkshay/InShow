@@ -155,7 +155,11 @@ export type Artifact =
 export type ChatMessage = {
   role: string;
   content: string;
-  metadata: { traversal?: Traversal; artifact?: Artifact | null };
+  metadata: {
+    traversal?: Traversal;
+    artifact?: Artifact | null;
+    suggestions?: string[];
+  };
   created_at: string;
 };
 
@@ -163,6 +167,7 @@ export type ChatReply = {
   content: string;
   traversal: Traversal;
   artifact: Artifact | null;
+  suggestions?: string[];
 };
 
 export type OntologyNode = { uid: string; label: string; source_id: number | null };

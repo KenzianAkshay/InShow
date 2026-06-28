@@ -7,8 +7,19 @@ deterministic Synthesise/Explain fallbacks.
 import io
 
 from app import booth_pipeline as bp
+from app.llm import LLMProvider
 
 EMPTY_CATALOG = {"by_kind": {}, "booth_meta": None}
+
+
+class _FakeLLM(LLMProvider):
+    """Records calls; returns canned prose (used for the Explain step)."""
+
+    calls = 0
+
+    def complete(self, system, messages):
+        _FakeLLM.calls += 1
+        return "Here is a tidy booth layout for you."
 
 
 def _kinds(program):
@@ -77,7 +88,30 @@ def test_run_asks_when_goals_missing():
     out = bp.run(None, None, "help me design my booth", [], None)
     assert out["artifact"] is None
     assert out["program"].get("_draft") is True
-    assert "•" in out["content"]  # lists the missing goals
+    assert out["content"].strip().endswith("?")
+    assert out["suggestions"]  # offers clickable answer options
+
+
+def test_ask_next_offers_size_then_type_options():
+    c1, s1 = bp._ask_next({"dims": None, "type": None, "zones": []}, EMPTY_CATALOG)
+    assert "footprint" in c1.lower() and any("×" in x for x in s1)
+    meta_catalog = {"by_kind": {}, "booth_meta": {"width": 6, "depth": 4, "type": "corner"}}
+    c2, s2 = bp._ask_next({"dims": [6, 4], "type": None, "zones": []}, meta_catalog)
+    assert "type" in c2.lower()
+    assert s2[0] == "Corner"  # catalog's booth type is offered first
+
+
+def test_ask_next_zone_options_come_from_catalog():
+    catalog = {
+        "by_kind": {"reception": {}, "demo": {}, "meeting": {}},
+        "booth_meta": None,
+    }
+    content, opts = bp._ask_next({"dims": [6, 4], "type": "corner", "zones": []}, catalog)
+    assert "zones" in content.lower()
+    joined = " ".join(opts).lower()
+    assert "reception" in joined and "demo" in joined and "meeting" in joined
+    # the catalog kinds are surfaced in the question text too
+    assert "catalog includes" in content.lower()
 
 
 def test_run_plans_after_goals_provided():
@@ -98,6 +132,39 @@ def test_run_accumulates_goals_across_turns():
     )
     assert s2["artifact"]["type"] == "booth_layout"
     assert s2["program"]["booth"]["width"] == 6.0
+
+
+def test_gathering_is_deterministic_and_aligned_even_with_llm():
+    # Regression: with an LLM present the agent must still gather goals
+    # deterministically, so the offered options match the question (size chips
+    # for the size question), and must not free-form / loop.
+    _FakeLLM.calls = 0
+    llm = _FakeLLM()
+    q1 = bp.run(llm, None, "design my booth", [], None)
+    assert q1["artifact"] is None
+    assert "footprint" in q1["content"].lower()
+    assert any("×" in s for s in q1["suggestions"])  # SIZE options, not types
+    assert _FakeLLM.calls == 0  # the LLM is not used to ask goal questions
+
+    # answering size advances to the type question with TYPE options
+    q2 = bp.run(llm, None, "6x4", [], q1["program"])
+    assert "type" in q2["content"].lower()
+    assert "Corner" in q2["suggestions"]
+
+    # answering type advances to zones (no loop back to size)
+    q3 = bp.run(llm, None, "corner", [], q2["program"])
+    assert "zones" in q3["content"].lower()
+
+
+def test_llm_explains_completed_layout():
+    _FakeLLM.calls = 0
+    out = bp.run(
+        _FakeLLM(), None,
+        "6x4 corner with a reception and 2 demo stations", [], None,
+    )
+    assert out["artifact"]["type"] == "booth_layout"
+    assert out["content"] == "Here is a tidy booth layout for you."  # LLM explains
+    assert _FakeLLM.calls == 1
 
 
 def test_run_produces_valid_booth_artifact_without_llm():

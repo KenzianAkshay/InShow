@@ -403,10 +403,12 @@ def chat(
             provider, agent["data_source_id"], payload.content, history, prev_program
         )
         empty = {"nodes": [], "edges": []}
+        suggestions = result.get("suggestions") or []
         metadata = {
             "traversal": empty,
             "artifact": result["artifact"],
             "program": result["program"],
+            "suggestions": suggestions,
         }
         conn = connect()
         conn.execute(
@@ -420,6 +422,7 @@ def chat(
             "content": result["content"],
             "traversal": empty,
             "artifact": result["artifact"],
+            "suggestions": suggestions,
         }
 
     conn.close()
