@@ -1,5 +1,5 @@
-# Stop InShow (Windows).
+# Stop ShowSphere (Windows).
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
 docker compose down
-Write-Host "InShow stopped."
+Write-Host "ShowSphere stopped."

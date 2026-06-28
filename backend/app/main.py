@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
     app.state.neo4j.close()
 
 
-app = FastAPI(title="InShow", lifespan=lifespan)
+app = FastAPI(title="ShowSphere", lifespan=lifespan)
 app.include_router(auth.router)
 app.include_router(projects.router)
 app.include_router(agents.router)

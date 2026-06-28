@@ -1,6 +1,6 @@
-# InShow - Implementation Plan
+# ShowSphere - Implementation Plan
 
-InShow is an Exhibitor Services Agent Platform: a collection of agents assisting
+ShowSphere is an Exhibitor Services Agent Platform: a collection of agents assisting
 trade-show planning, servicing, and execution, working over a common, evolving
 semantic layer held in a Neo4j graph database.
 

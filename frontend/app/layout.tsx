@@ -7,7 +7,7 @@ import NavBar from "./components/NavBar";
 import MetalBackground from "./components/metal/MetalBackground";
 
 export const metadata: Metadata = {
-  title: "InShow",
+  title: "ShowSphere",
   description: "Exhibitor Services Agent Platform",
 };
 

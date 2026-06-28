@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ChevronRight, Hexagon, LogOut } from "lucide-react";
+import { ChevronRight, LogOut } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/app/components/ui/button";
+import { LogoMark } from "@/app/components/Logo";
 import ThemeToggle from "@/app/components/metal/ThemeToggle";
 
 type Crumb = { label: string; href: string };
@@ -14,11 +15,11 @@ type Crumb = { label: string; href: string };
 function BrandMark() {
   return (
     <Link href="/" className="group flex items-center gap-2">
-      <span className="relative grid size-8 place-items-center rounded-[10px] bg-[linear-gradient(180deg,#ff9678,#ff7a59_55%,#ef5f3d)] shadow-[0_6px_16px_-8px_rgba(255,122,89,0.9)]">
-        <Hexagon className="size-4 text-white" strokeWidth={2.4} />
+      <span className="relative grid size-8 place-items-center rounded-[10px] bg-[linear-gradient(180deg,#ff9678,#ff7a59_55%,#ef5f3d)] text-white shadow-[0_6px_16px_-8px_rgba(255,122,89,0.9)]">
+        <LogoMark className="size-[18px]" />
       </span>
       <span className="text-[1.05rem] font-bold tracking-tight text-foreground">
-        InShow
+        ShowSphere
       </span>
     </Link>
   );

@@ -479,7 +479,7 @@ def explain(provider: LLMProvider | None, program: dict, result: dict) -> str:
         "repairs": result["repairs"],
     }
     system = (
-        "You are an InShow booth-design assistant. In 2-4 short sentences, explain the "
+        "You are a ShowSphere booth-design assistant. In 2-4 short sentences, explain the "
         "layout to the exhibitor: what's placed and why, that it meets aisle/egress and "
         "fit rules, and invite a refinement. Do not output JSON or code blocks."
     )

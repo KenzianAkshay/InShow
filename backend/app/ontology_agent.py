@@ -20,7 +20,7 @@ from pathlib import Path
 router = APIRouter(prefix="/api", dependencies=[Depends(require_user)])
 
 SYSTEM = (
-    "You are the Ontology Creation agent for InShow, a trade-show platform. "
+    "You are the Ontology Creation agent for ShowSphere, a trade-show platform. "
     "You research a dataset, analyse its columns, reason about the entities and "
     "relationships it describes, and design a comprehensive graph data model."
 )

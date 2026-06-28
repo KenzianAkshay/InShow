@@ -1,4 +1,4 @@
-# InShow
+# ShowSphere
 
 Exhibitor Services Agent Platform: a collection of agents for trade-show
 planning, servicing, and execution, working over a shared, evolving semantic

@@ -1,8 +1,8 @@
-# The InShow web app
+# The ShowSphere web app
 
 ## Business Requirements
 
-This project is building a Exhibitor Services Agent Platform "InShow" which will be a collection of agents,assisting various business processes related to Trade
+This project is building a Exhibitor Services Agent Platform "ShowSphere" which will be a collection of agents,assisting various business processes related to Trade
 Show Planning , Servicing and Execution. All these agents will continue to work on a common and evolving symantic layer which would be on a neo4j graph database.
 
 ### Key Features

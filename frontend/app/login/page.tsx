@@ -3,7 +3,8 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Hexagon, LogIn } from "lucide-react";
+import { LogIn } from "lucide-react";
+import { LogoMark } from "@/app/components/Logo";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 import { Label } from "@/app/components/ui/label";
@@ -39,13 +40,13 @@ export default function Login() {
         transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
         className="glass sheen w-full max-w-sm p-8"
       >
-        <span className="mb-5 grid size-12 place-items-center rounded-2xl bg-[linear-gradient(180deg,#ff9678,#ff7a59_55%,#ef5f3d)] shadow-[0_12px_30px_-12px_rgba(255,122,89,0.9)]">
-          <Hexagon className="size-6 text-white" strokeWidth={2.4} />
+        <span className="mb-5 grid size-12 place-items-center rounded-2xl bg-[linear-gradient(180deg,#ff9678,#ff7a59_55%,#ef5f3d)] text-white shadow-[0_12px_30px_-12px_rgba(255,122,89,0.9)]">
+          <LogoMark className="size-7" />
         </span>
 
         <h1 className="mb-1 text-2xl font-bold tracking-tight">Sign in</h1>
         <p className="mb-7 text-sm text-muted-foreground">
-          InShow Exhibitor Services Agent Platform
+          ShowSphere · Exhibitor Services Agent Platform
         </p>
 
         <div className="mb-4">

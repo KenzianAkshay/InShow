@@ -43,7 +43,7 @@ def detect_social(message: str) -> str | None:
 
 _GENERIC = {
     "greeting": (
-        "Hello! I'm your InShow assistant for this show. I can answer questions "
+        "Hello! I'm your ShowSphere assistant for this show. I can answer questions "
         "about the project's data, build charts, and crunch the numbers — what "
         "would you like to explore?"
     ),
