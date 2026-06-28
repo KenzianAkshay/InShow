@@ -181,7 +181,7 @@ export type Ontology = {
 
 // Class-level schema graph: one node per class, edges aggregated by type.
 export type OntologySchema = {
-  classes: { name: string; count: number }[];
+  classes: { name: string; count: number; properties?: string[] }[];
   edges: { from: string; to: string; type: string; count: number }[];
 };
 

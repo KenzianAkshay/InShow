@@ -134,6 +134,16 @@ export default function OntologyPanel({
       : new Set(revealed.map(classOf));
   }, [view, pathNodes, step]);
 
+  // Columns folded into the open class as properties (not promoted to their own
+  // class) — surfaced so they don't look "missing" from the class map.
+  const attributes = useMemo(
+    () =>
+      view.kind === "class"
+        ? schema?.classes.find((c) => c.name === view.label)?.properties ?? []
+        : [],
+    [view, schema],
+  );
+
   const classCount = schema?.classes.length ?? 0;
   const relCount = schema?.edges.length ?? 0;
   const hasSchema = classCount > 0;
@@ -182,6 +192,24 @@ export default function OntologyPanel({
         </p>
       ) : (
         <>
+          {view.kind === "class" && attributes.length > 0 && (
+            <div className="shrink-0 border-b border-border/70 px-4 py-2.5">
+              <div className="mb-1.5 text-[0.68rem] font-semibold uppercase tracking-wide text-muted-foreground">
+                Attributes · {attributes.length}{" "}
+                {attributes.length === 1 ? "column" : "columns"}
+              </div>
+              <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
+                {attributes.map((a) => (
+                  <span
+                    key={a}
+                    className="rounded-md border border-border bg-secondary/60 px-2 py-0.5 text-xs text-foreground"
+                  >
+                    {a}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="relative min-h-[180px] w-full flex-1">
             {view.kind === "schema" ? (
               <OntologySchema2D

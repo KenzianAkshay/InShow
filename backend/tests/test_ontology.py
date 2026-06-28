@@ -172,6 +172,15 @@ class _SchemaSession:
         return False
 
     def run(self, query, **kw):
+        if "collect(DISTINCT k) AS props" in query:
+            return [
+                {
+                    "name": "Exhibitors",
+                    # internal keys + 'value' must be filtered out
+                    "props": ["Exhibitor Name", "Balance Due", "value", "uid"],
+                },
+                {"name": "City", "props": ["value", "project_id"]},
+            ]
         if "RETURN name, count(*)" in query:
             return [
                 {"name": "Exhibitors", "count": 5},
@@ -197,6 +206,15 @@ def test_schema_ontology_builds_class_graph():
     assert out["edges"] == [
         {"from": "Exhibitors", "to": "City", "type": "HAS_CITY", "count": 7}
     ]
+
+
+def test_schema_ontology_surfaces_class_properties():
+    out = schema_ontology(_SchemaDriver(), project_id=1)
+    by_name = {c["name"]: c for c in out["classes"]}
+    # data columns folded into the record class are surfaced, sorted, with
+    # internal keys and the dimension 'value' filtered out
+    assert by_name["Exhibitors"]["properties"] == ["Balance Due", "Exhibitor Name"]
+    assert by_name["City"]["properties"] == []
 
 
 class _InstSession:

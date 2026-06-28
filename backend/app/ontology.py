@@ -233,6 +233,28 @@ def build_graph(driver: Driver, spec: dict, source_id: int, project_id: int) -> 
 
 
 _INTERNAL_KEYS = {"uid", "project_id", "source_id", "ingested_at"}
+# Dimension nodes carry their identity in a single "value" property; it is the
+# node, not an attribute to list, so it is hidden from the schema property view.
+_NON_PROP_KEYS = _INTERNAL_KEYS | {"value"}
+
+
+def _class_properties(session, project_id: int) -> dict[str, list[str]]:
+    """Map each class to the data columns folded into it as properties (the
+    columns kept as attributes rather than promoted to their own class). Lets the
+    schema view reveal where a column like 'Exhibitor Name' or 'Balance Due'
+    landed instead of it looking 'missing'."""
+    out: dict[str, set[str]] = {}
+    for r in session.run(
+        "MATCH (e:Entity {project_id: $pid}) "
+        "WITH [l IN labels(e) WHERE l <> 'Entity'][0] AS name, keys(e) AS ks "
+        "WHERE name IS NOT NULL "
+        "UNWIND ks AS k "
+        "RETURN name, collect(DISTINCT k) AS props",
+        pid=project_id,
+    ):
+        keys = {k for k in (r["props"] or []) if k not in _NON_PROP_KEYS}
+        out.setdefault(r["name"], set()).update(keys)
+    return {name: sorted(keys) for name, keys in out.items()}
 
 
 def retrieve_context(
@@ -434,13 +456,20 @@ def export_jsonld(driver: Driver, project_id: int, scope: str = "full") -> dict:
 
 def schema_ontology(driver: Driver, project_id: int) -> dict:
     """The class-level (schema/TBox) graph for a project: one node per class with
-    its instance count, and class-to-class edges aggregated by relationship type
-    with counts. This is the legible default view — dozens of classes instead of
-    hundreds of instances. Unbounded counts (not capped like the instance graph).
+    its instance count and the data columns folded into it as properties, plus
+    class-to-class edges aggregated by relationship type with counts. This is the
+    legible default view — dozens of classes instead of hundreds of instances.
+    Property keys let the UI show columns (e.g. Exhibitor Name, Balance Due) that
+    were kept as attributes rather than promoted to their own dimension class.
     """
     with driver.session() as session:
+        props_by_class = _class_properties(session, project_id)
         classes = [
-            {"name": r["name"], "count": r["count"]}
+            {
+                "name": r["name"],
+                "count": r["count"],
+                "properties": props_by_class.get(r["name"], []),
+            }
             for r in session.run(
                 "MATCH (e:Entity {project_id: $pid}) "
                 "WITH [l IN labels(e) WHERE l <> 'Entity'][0] AS name "
