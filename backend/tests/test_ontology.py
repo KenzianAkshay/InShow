@@ -162,6 +162,10 @@ class _CtxDriver:
 
 
 class _CtxSession:
+    """Two-stage mock: a 'berlin' term seeds the City:Berlin value node, which
+    resolves to its record hub (Exhibitor:Acme); the hub is then assembled with
+    its full attribute set."""
+
     def __enter__(self):
         return self
 
@@ -169,24 +173,52 @@ class _CtxSession:
         return False
 
     def run(self, query, **kw):
+        if "collect(DISTINCT h.uid)" in query:  # 1) seeds -> record hubs
+            data = [{"uid": "City:Berlin", "isValue": True, "hubs": ["Exhibitor:Acme"]}]
+        elif "rec.uid IN $anchors" in query:  # 2) assemble full record
+            data = [
+                {
+                    "uid": "Exhibitor:Acme",
+                    "label": "Exhibitor",
+                    "props": {"booth": "A12", "project_id": 1},
+                    "rels": [
+                        {
+                            "to": "City:Berlin",
+                            "toLabel": "City",
+                            "type": "HAS_CITY",
+                            "value": "Berlin",
+                        }
+                    ],
+                }
+            ]
+        else:
+            data = []
+
         class R:
             def data(self_inner):
-                return [
-                    {"uid": "City:Berlin", "label": "City",
-                     "rels": [{"to": "Exhibitor:Acme", "type": "HAS_CITY"}]}
-                ]
+                return data
+
         return R()
 
 
 def test_retrieve_context_builds_traversal():
     out = retrieve_context(_CtxDriver(), "where is berlin", project_id=1)
-    assert "City:Berlin" in out["context"]
+    # the matched value is assembled into its full record, attributes inline
+    assert "City=Berlin" in out["context"]
+    assert "booth=A12" in out["context"]
     assert "City:Berlin" in out["traversal"]["nodes"]
+    assert "Exhibitor:Acme" in out["traversal"]["nodes"]
     assert out["traversal"]["edges"][0]["type"] == "HAS_CITY"
 
 
 def test_retrieve_context_empty_query():
     out = retrieve_context(_CtxDriver(), "a", project_id=1)  # too short for terms
+    assert out == {"context": "", "traversal": {"nodes": [], "edges": []}}
+
+
+def test_retrieve_context_ignores_stopwords_only_query():
+    # filler/question words match no data values, so they must not retrieve
+    out = retrieve_context(_CtxDriver(), "show me the details please", project_id=1)
     assert out == {"context": "", "traversal": {"nodes": [], "edges": []}}
 
 

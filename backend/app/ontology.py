@@ -270,33 +270,79 @@ def _class_properties(session, project_id: int) -> dict[str, list[str]]:
     return {name: sorted(keys) for name, keys in out.items()}
 
 
+# Question/filler words that should not drive entity retrieval — matching is
+# done on stored DATA VALUES, so these would only ever produce noise.
+_STOPWORDS = {
+    "show", "the", "for", "and", "with", "all", "please", "give", "list",
+    "what", "which", "who", "whom", "whose", "are", "was", "were", "you",
+    "your", "our", "details", "detail", "information", "info", "about",
+    "tell", "can", "could", "would", "should", "does", "this", "that",
+    "these", "those", "from", "have", "has", "had", "any", "get", "see",
+    "want", "need", "there", "their", "its", "into", "per", "name", "names",
+}
+
+
 def retrieve_context(
     driver: Driver, query: str, project_id: int, limit: int = 12
 ) -> dict:
-    """Ground a prompt on the project's ontology: find entities whose uid or any
-    property value matches the query, and pull their immediate neighbourhood and
-    stored data values. Returns a context string for the LLM (entities with their
-    properties and relationships — the only facts the agent is allowed to use) and
-    the traversal path (nodes + edges touched) for the live visualization to
-    animate. Scoped to the Show Project so traversal stays relevant.
+    """Ground a prompt on the project's ontology and return only the facts the
+    agent is allowed to use, plus the traversal path for the live visualization.
+
+    Matching is done on stored DATA VALUES (not the synthetic ``Class:value``
+    uid prefix), so a domain word like "booth" no longer matches every
+    ``Booth*`` node and crowd out the specific term the user cares about (e.g.
+    "Rockwell"). Each matched value node is then resolved to the record(s) it
+    belongs to, and every record is assembled in full — its own properties plus
+    all of its attribute value nodes — so star-schema rows (where each column is
+    its own node) can still answer questions like "booth type for X". Scoped to
+    the Show Project.
     """
-    terms = [t for t in re.findall(r"[A-Za-z0-9]+", query.lower()) if len(t) > 2]
+    tokens = re.findall(r"[A-Za-z0-9]+", query.lower())
+    terms = [t for t in tokens if len(t) > 2 and t not in _STOPWORDS]
     empty = {"context": "", "traversal": {"nodes": [], "edges": []}}
     if not terms:
         return empty
 
+    internal = list(_INTERNAL_KEYS)
     with driver.session() as session:
-        records = session.run(
+        # 1) Seeds: entities whose data values match a term. A value node (one
+        #    column = one node) resolves to the record hub(s) it hangs off; a
+        #    record/property node is its own anchor.
+        seeds = session.run(
             "MATCH (e:Entity {project_id: $pid}) "
-            "WHERE any(t IN $terms WHERE toLower(e.uid) CONTAINS t "
-            "OR any(k IN keys(e) WHERE toLower(toString(e[k])) CONTAINS t)) "
-            "OPTIONAL MATCH (e)-[r]-(n:Entity {project_id: $pid}) "
-            "RETURN e.uid AS uid, "
-            "[l IN labels(e) WHERE l <> 'Entity'][0] AS label, "
-            "properties(e) AS props, "
-            "collect(DISTINCT {to: n.uid, type: type(r)})[..6] AS rels "
-            "LIMIT $limit",
-            terms=terms, pid=project_id, limit=limit,
+            "WITH e, [k IN keys(e) WHERE NOT k IN $internal] AS dkeys "
+            "WHERE any(t IN $terms WHERE "
+            "any(k IN dkeys WHERE toLower(toString(e[k])) CONTAINS t)) "
+            "OPTIONAL MATCH (e)-[]-(h:Entity {project_id: $pid}) "
+            "WHERE e.value IS NOT NULL AND h.value IS NULL "
+            "WITH e, collect(DISTINCT h.uid)[..8] AS hubs "
+            "RETURN e.uid AS uid, (e.value IS NOT NULL) AS isValue, hubs "
+            "LIMIT 50",
+            terms=terms, pid=project_id, internal=internal,
+        ).data()
+
+        anchors: list[str] = []
+        for s in seeds:
+            picks = s["hubs"] if (s["isValue"] and s["hubs"]) else [s["uid"]]
+            for uid in picks:
+                if uid not in anchors:
+                    anchors.append(uid)
+        anchors = anchors[:limit]
+        if not anchors:
+            return empty
+
+        # 2) Assemble each record in full: own data props + every attribute
+        #    value node one hop away.
+        records = session.run(
+            "MATCH (rec:Entity {project_id: $pid}) WHERE rec.uid IN $anchors "
+            "OPTIONAL MATCH (rec)-[r]-(v:Entity {project_id: $pid}) "
+            "RETURN rec.uid AS uid, "
+            "[l IN labels(rec) WHERE l <> 'Entity'][0] AS label, "
+            "properties(rec) AS props, "
+            "collect(DISTINCT {to: v.uid, "
+            "toLabel: [l IN labels(v) WHERE l <> 'Entity'][0], "
+            "type: type(r), value: v.value})[..50] AS rels",
+            anchors=anchors, pid=project_id,
         ).data()
 
     nodes: list[str] = []
@@ -305,22 +351,21 @@ def retrieve_context(
     for record in records:
         uid = record["uid"]
         nodes.append(uid)
-        props = {
-            k: v
-            for k, v in (record.get("props") or {}).items()
-            if k not in _INTERNAL_KEYS and str(v).strip() != ""
-        }
-        prop_str = ", ".join(f"{k}={v}" for k, v in props.items())
-        related = []
+        attrs: list[str] = []
+        for k, v in (record.get("props") or {}).items():
+            if k not in _NON_PROP_KEYS and str(v).strip() != "":
+                attrs.append(f"{k}={v}")
         for rel in record["rels"]:
             if rel.get("to") is None:
                 continue
             nodes.append(rel["to"])
             edges.append({"from": uid, "to": rel["to"], "type": rel["type"]})
-            related.append(f"{rel['type']} {rel['to']}")
-        detail = f" [{prop_str}]" if prop_str else ""
-        suffix = f" ({'; '.join(related)})" if related else ""
-        lines.append(f"- {record['label']} {uid}{detail}{suffix}")
+            val = rel.get("value")
+            if val is not None and str(val).strip() != "":
+                attrs.append(f"{rel['toLabel']}={val}")
+        detail = "; ".join(attrs)
+        lines.append(f"- {record['label']}: {detail}" if detail
+                     else f"- {record['label']} {uid}")
 
     return {
         "context": "\n".join(lines),
