@@ -34,6 +34,7 @@ export default function AgentSetup() {
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [dataSourceId, setDataSourceId] = useState<number | "">("");
+  const [systemPrompt, setSystemPrompt] = useState("");
   const [ontology, setOntology] = useState("");
   const [saved, setSaved] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -87,6 +88,7 @@ export default function AgentSetup() {
         setModel(a.model_name ?? "");
         setApiKey(String(a.config?.api_key ?? ""));
         setDataSourceId(a.data_source_id ?? "");
+        setSystemPrompt(String(a.config?.system_prompt ?? ""));
         setOntology(String(a.config?.ontology_instructions ?? ""));
         if (a.show_project_id !== null) {
           setProjectId(a.show_project_id);
@@ -101,7 +103,11 @@ export default function AgentSetup() {
       model_provider: provider,
       model_name: model || MODELS[provider][0],
       data_source_id: dataSourceId === "" ? null : Number(dataSourceId),
-      config: { ontology_instructions: ontology, api_key: apiKey },
+      config: {
+        system_prompt: systemPrompt,
+        ontology_instructions: ontology,
+        api_key: apiKey,
+      },
     });
     setAgent(updated);
     setSaved(true);
@@ -273,12 +279,27 @@ export default function AgentSetup() {
           )}
 
           <div>
+            <Label htmlFor="systemprompt">System prompt</Label>
+            <Textarea
+              id="systemprompt"
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              rows={4}
+              placeholder="Sets the agent's persona and behavior, e.g. “You are a concise booth-services concierge. Prefer tables over prose.”"
+            />
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              Controls how the agent behaves. The platform&apos;s data-grounding
+              rules are always enforced on top of this.
+            </p>
+          </div>
+
+          <div>
             <Label htmlFor="ontology">Ontology instructions</Label>
             <Textarea
               id="ontology"
               value={ontology}
               onChange={(e) => setOntology(e.target.value)}
-              rows={4}
+              rows={3}
               placeholder="Guidance for how this agent should build and use the ontology layer."
             />
           </div>

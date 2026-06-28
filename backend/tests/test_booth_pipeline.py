@@ -66,6 +66,40 @@ def test_catalog_sizes_applied_to_zones():
     assert demo["w"] == 1.8 and demo["d"] == 1.2
 
 
+def test_run_greets_politely():
+    out = bp.run(None, None, "hello", [], None)
+    assert out["artifact"] is None
+    assert "Hello" in out["content"]
+    assert "booth" in out["content"].lower() or "stand" in out["content"].lower()
+
+
+def test_run_asks_when_goals_missing():
+    out = bp.run(None, None, "help me design my booth", [], None)
+    assert out["artifact"] is None
+    assert out["program"].get("_draft") is True
+    assert "•" in out["content"]  # lists the missing goals
+
+
+def test_run_plans_after_goals_provided():
+    first = bp.run(None, None, "design my booth", [], None)
+    assert first["artifact"] is None
+    second = bp.run(
+        None, None, "6x4 corner with a reception and 2 demo stations", [], first["program"]
+    )
+    assert second["artifact"] and second["artifact"]["type"] == "booth_layout"
+    assert second["program"]["booth"]["type"] == "corner"
+
+
+def test_run_accumulates_goals_across_turns():
+    s1 = bp.run(None, None, "plan a 6x4 booth", [], None)
+    assert s1["artifact"] is None and s1["program"]["dims"] == [6.0, 4.0]
+    s2 = bp.run(
+        None, None, "make it a corner with a reception and 2 demo stations", [], s1["program"]
+    )
+    assert s2["artifact"]["type"] == "booth_layout"
+    assert s2["program"]["booth"]["width"] == 6.0
+
+
 def test_run_produces_valid_booth_artifact_without_llm():
     out = bp.run(
         None, None,

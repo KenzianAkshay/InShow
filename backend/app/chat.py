@@ -5,7 +5,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from app import analytics, booth_pipeline
+from app import analytics, booth_pipeline, conversation
 from app.auth import require_user
 from app.db import connect
 from app.llm import get_provider
@@ -151,7 +151,16 @@ def _ontology_context(request: Request, query: str, project_id: int) -> dict:
 def _build_system(config: dict, grounding: dict, peers: list | None = None) -> str:
     """Assemble a strictly-grounded system prompt: the agent may only use the
     project's ontology and ingested data, never outside knowledge."""
-    system = "You are an InShow exhibitor-services agent for trade shows."
+    # An operator-supplied system prompt sets the agent's persona/behavior; the
+    # platform's grounding and analytics rules are always appended after it.
+    system = (
+        config.get("system_prompt")
+        or "You are an InShow exhibitor-services agent for trade shows."
+    )
+    system += (
+        "\n\nBe warm and courteous: greet the user, respond briefly to small talk, "
+        "and keep a polite, professional tone throughout."
+    )
     if config.get("ontology_instructions"):
         system += "\n\n" + config["ontology_instructions"]
     system += "\n\n" + GROUNDING_RULES
@@ -441,35 +450,40 @@ def chat(
             reply = provider.complete_with_tools(system, messages, tools, dispatch)
             content, artifact = extract_artifact(reply)
         except Exception as exc:
-            # Degrade gracefully: try a deterministic analytic answer before erroring.
-            det = _deterministic(request, project_id, payload.content)
-            if det is None:
-                raise HTTPException(502, f"LLM provider error: {exc}")
-            content, artifact = det["content"], det["artifact"]
-    else:
-        # No language model configured. If the user explicitly names another
-        # agent, delegate to it; otherwise answer analytics deterministically.
-        sib = _addressed_sibling(peers, payload.content)
-        if sib is not None:
-            sub = run_subagent(request, sib, payload.content)
-            content = f"I consulted **{sib['name']}** — {sub['content']}"
-            artifact = sub["artifact"]
-        else:
+            # Degrade gracefully: try a deterministic analytic answer, then a
+            # polite social reply, before erroring.
             det = _deterministic(request, project_id, payload.content)
             if det is not None:
                 content, artifact = det["content"], det["artifact"]
             else:
-                hint = (
-                    f' or ask another agent, e.g. "ask {peers[0]["name"]} ..."'
-                    if peers
-                    else ""
-                )
-                content, artifact = (
-                    "No language model is configured for this agent, so I answer "
-                    "analytics deterministically. Try a quantitative request like "
-                    '"chart exhibitors by city" or "how many sponsors"' + hint + ".",
-                    None,
-                )
+                social = conversation.social_reply(payload.content)
+                if social is None:
+                    raise HTTPException(502, f"LLM provider error: {exc}")
+                content, artifact = social, None
+    else:
+        # No language model configured. Delegation > analytics > greetings > hint.
+        sib = _addressed_sibling(peers, payload.content)
+        det = None if sib is not None else _deterministic(request, project_id, payload.content)
+        if sib is not None:
+            sub = run_subagent(request, sib, payload.content)
+            content = f"I consulted **{sib['name']}** — {sub['content']}"
+            artifact = sub["artifact"]
+        elif det is not None:
+            content, artifact = det["content"], det["artifact"]
+        elif conversation.social_reply(payload.content) is not None:
+            content, artifact = conversation.social_reply(payload.content), None
+        else:
+            hint = (
+                f' or ask another agent, e.g. "ask {peers[0]["name"]} ..."'
+                if peers
+                else ""
+            )
+            content, artifact = (
+                "Happy to help! I work over this project's ingested data — try a "
+                'request like "chart exhibitors by city" or "how many sponsors"'
+                + hint + ".",
+                None,
+            )
 
     metadata = {"traversal": grounding["traversal"], "artifact": artifact}
     conn = connect()

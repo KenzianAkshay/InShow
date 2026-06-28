@@ -130,6 +130,18 @@ def test_ask_agent_tool_path(auth_up, monkeypatch):
     assert r.json()["content"].startswith("Stats says:")
 
 
+def test_system_prompt_sets_persona(auth, monkeypatch):
+    monkeypatch.setattr(chatmod, "get_provider", lambda *a, **k: _Fake())
+    aid = _agent(
+        auth,
+        config={"api_key": "sk-x", "system_prompt": "You are Bob, a terse booth concierge."},
+    )
+    auth.post(f"/api/agents/{aid}/chat", json={"content": "hi"})
+    # The operator's system prompt is the persona; grounding rules still apply.
+    assert "You are Bob, a terse booth concierge." in _Fake.system
+    assert "STRICT GROUNDING" in _Fake.system
+
+
 def test_chat_missing_agent(auth, monkeypatch):
     monkeypatch.setattr(chatmod, "get_provider", lambda *a, **k: _Fake())
     assert auth.post("/api/agents/999999/chat", json={"content": "x"}).status_code == 404
@@ -170,5 +182,17 @@ def test_chat_without_key_answers_deterministically(auth_up):
     r = auth_up.post(f"/api/agents/{aid}/chat", json={"content": "chart it"})
     assert r.status_code == 200
     body = r.json()
-    assert "deterministically" in body["content"]
+    assert "ingested data" in body["content"]
     assert body["artifact"] is None
+
+
+def test_chat_greets_politely_without_key(auth_up):
+    aid = _agent(auth_up)
+    r = auth_up.post(f"/api/agents/{aid}/chat", json={"content": "hi there"})
+    assert r.status_code == 200
+    body = r.json()
+    assert "Hello" in body["content"]
+    assert body["artifact"] is None
+    # A real analytic request that starts with a greeting is NOT hijacked.
+    r2 = auth_up.post(f"/api/agents/{aid}/chat", json={"content": "thanks!"})
+    assert "welcome" in r2.json()["content"].lower()

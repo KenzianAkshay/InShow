@@ -16,6 +16,7 @@ import re
 from copy import deepcopy
 from pathlib import Path
 
+from app import conversation
 from app.db import connect
 from app.ingestion import parse_sheets
 from app.llm import LLMProvider
@@ -294,6 +295,109 @@ def synthesise(
 
 
 # --------------------------------------------------------------------------- #
+# Goal gathering — ask clarifying questions when key details are missing
+# --------------------------------------------------------------------------- #
+def _merge_spec(draft: dict | None, message: str, catalog: dict) -> dict:
+    """Accumulate the goals the exhibitor has stated so far (booth size, type,
+    zones) across turns, so a follow-up answer completes an earlier request."""
+    spec = {"dims": None, "type": None, "zones": []}
+    if draft:
+        spec["dims"] = draft.get("dims")
+        spec["type"] = draft.get("type")
+        spec["zones"] = list(draft.get("zones") or [])
+    dims = _parse_dims(message)
+    if dims:
+        spec["dims"] = [dims[0], dims[1]]
+    btype = _parse_type(message)
+    if btype:
+        spec["type"] = btype
+    seen = {z["kind"] for z in spec["zones"]}
+    for z in _extract_zones(message):
+        if z["kind"] not in seen:
+            spec["zones"].append(z)
+            seen.add(z["kind"])
+    meta = catalog.get("booth_meta")
+    if meta:
+        spec["dims"] = spec["dims"] or [meta["width"], meta["depth"]]
+        spec["type"] = spec["type"] or meta.get("type")
+    return spec
+
+
+def _missing_goals(spec: dict) -> list[str]:
+    missing = []
+    if not spec.get("dims"):
+        missing.append("the booth size (for example, 6×4 m)")
+    if not spec.get("type"):
+        missing.append("the booth type — inline, corner, peninsula, or island")
+    if not spec.get("zones"):
+        missing.append(
+            "which zones to include (e.g. reception, 2 demo stations, a meeting "
+            "room, storage)"
+        )
+    return missing
+
+
+def _goal_questions(missing: list[str]) -> str:
+    lead = (
+        "Happy to plan your stand. To get the layout right, could you tell me "
+        + ("a couple of things" if len(missing) > 1 else "one thing")
+        + ":\n"
+    )
+    return lead + "\n".join(f"• {m}" for m in missing)
+
+
+def _program_from_spec(spec: dict, catalog: dict) -> dict:
+    booth = {
+        "width": float(spec["dims"][0]),
+        "depth": float(spec["dims"][1]),
+        "type": spec.get("type") or "inline",
+    }
+    program = {
+        "booth": booth,
+        "zones": [dict(z) for z in spec["zones"]],
+        "constraints": {},
+    }
+    return _normalise_program(program, catalog)
+
+
+def _llm_program_or_question(
+    provider: LLMProvider, message: str, history: list[dict], catalog: dict
+) -> dict:
+    """Ask the model to either emit a program or, if booth size / type / zones
+    are unspecified, ask a brief clarifying question instead."""
+    kinds = ", ".join(sorted(ZONE_KINDS))
+    sizes = json.dumps(catalog["by_kind"]) if catalog["by_kind"] else "(none provided)"
+    system = (
+        "You convert a trade-show exhibitor's request into a booth layout. "
+        "If the request is missing the booth size, the booth type, or which zones "
+        "to include, ask a brief, friendly clarifying question for ONLY the missing "
+        "details and do NOT emit a program. Otherwise reply with ONLY one fenced "
+        "```program {JSON}``` block (no prose). Schema:\n"
+        '{"booth":{"width":<m>,"depth":<m>,"type":"inline|corner|peninsula|island"},'
+        '"zones":[{"name":"...","kind":"<one of: ' + kinds + '>","count":<int>,'
+        '"priority":<1-5>}],"constraints":{"aisle_width":<m>,"max_height":<m>}}\n'
+        f"Available element sizes from the catalog: {sizes}"
+    )
+    msgs = [{"role": m["role"], "content": m["content"]} for m in history]
+    msgs.append({"role": "user", "content": message})
+    reply = provider.complete(system, msgs)
+    match = PROGRAM_RE.search(reply)
+    if match:
+        try:
+            program = json.loads(match.group(1))
+            if isinstance(program, dict) and "zones" in program:
+                return {"kind": "plan", "program": _normalise_program(program, catalog)}
+        except json.JSONDecodeError:
+            pass
+    text = PROGRAM_RE.sub("", reply).strip()
+    return {
+        "kind": "question",
+        "text": text
+        or "Could you share the booth size, type, and the zones you'd like to include?",
+    }
+
+
+# --------------------------------------------------------------------------- #
 # 7 · Explain
 # --------------------------------------------------------------------------- #
 def _template_explain(program: dict, result: dict) -> str:
@@ -363,7 +467,50 @@ def run(
     prev_program: dict | None,
 ) -> dict:
     catalog = read_catalog(data_source_id)
-    program = synthesise(provider, message, history, prev_program, catalog)
+    is_draft = isinstance(prev_program, dict) and prev_program.get("_draft")
+    draft = prev_program if is_draft else None
+    real_prev = None if is_draft else prev_program
+
+    if real_prev is None:
+        # First layout (or still gathering goals): plan only when booth size, type
+        # and zones are known — otherwise ask for the missing details.
+        program = None
+        if provider is not None:
+            try:
+                outcome = _llm_program_or_question(provider, message, history, catalog)
+            except Exception:
+                outcome = None
+            if outcome is not None:
+                if outcome["kind"] == "question":
+                    return {
+                        "content": outcome["text"],
+                        "artifact": None,
+                        "program": {"_draft": True},
+                    }
+                program = outcome["program"]
+        if program is None:
+            spec = _merge_spec(draft, message, catalog)
+            has_any = bool(spec["dims"] or spec["type"] or spec["zones"])
+            if not has_any:
+                social = conversation.social_reply(message, booth=True)
+                if social is not None:
+                    return {
+                        "content": social,
+                        "artifact": None,
+                        "program": {"_draft": True, **spec},
+                    }
+            missing = _missing_goals(spec)
+            if missing:
+                return {
+                    "content": _goal_questions(missing),
+                    "artifact": None,
+                    "program": {"_draft": True, **spec},
+                }
+            program = _program_from_spec(spec, catalog)
+    else:
+        # Iterating on an existing layout.
+        program = synthesise(provider, message, history, real_prev, catalog)
+
     result = plan_layout(program)
     artifact = to_artifact(program, result)
     content = explain(provider, program, result)
