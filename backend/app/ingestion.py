@@ -25,19 +25,57 @@ DATA_DIR = Path(
 router = APIRouter(prefix="/api", dependencies=[Depends(require_user)])
 
 
-def _sheet_to_records(ws) -> list[dict]:
-    rows = ws.iter_rows(values_only=True)
-    try:
-        header = next(rows)
-    except StopIteration:
+def _filled(row) -> int:
+    """Count of non-blank cells in a row."""
+    return sum(1 for c in row if c is not None and str(c).strip() != "")
+
+
+def _detect_header_idx(rows: list) -> int:
+    """Index of the most likely header row, skipping leading banner/title rows.
+
+    Spreadsheets exported for people often start with a merged title/banner
+    (e.g. "EXHIBITOR BOOTH AVAILABILITY & PRICING — TechExpo 2026") and maybe a
+    blank line, with the real column headers a few rows down. A banner is narrow
+    (one or two populated cells) while the header spans the table width, so we
+    take the first row that is wide relative to the table — the header, since
+    data follows it. No banner → row 0 wins, matching the old behaviour.
+    """
+    scan = rows[:25]
+    width = max((_filled(r) for r in scan), default=0)
+    if width <= 1:
+        return 0
+    threshold = max(2, (width * 3 + 4) // 5)  # ~0.6 of the table width
+    for i, row in enumerate(scan):
+        if _filled(row) >= threshold:
+            return i
+    return 0
+
+
+def _records_from_rows(rows: list) -> list[dict]:
+    """Turn a sheet's raw rows into records: find the header row (past any
+    banner), de-duplicate/auto-name header cells, then map each data row.
+    All cells coerced to strings, keeping Neo4j property types simple."""
+    rows = [tuple(r) for r in rows]
+    if not rows:
         return []
-    headers = [str(h) if h is not None else f"col{i}" for i, h in enumerate(header)]
+    start = _detect_header_idx(rows)
+    header = rows[start]
+    headers: list[str] = []
+    seen: dict[str, int] = {}
+    for i, h in enumerate(header):
+        name = "" if h is None else str(h).strip()
+        if not name:
+            name = f"col{i}"
+        if name in seen:
+            seen[name] += 1
+            name = f"{name}_{seen[name]}"
+        else:
+            seen[name] = 0
+        headers.append(name)
     records = []
-    for row in rows:
-        if all(c is None for c in row):
+    for row in rows[start + 1:]:
+        if all(c is None or str(c).strip() == "" for c in row):
             continue
-        # Coerce all cells to strings, matching CSV behaviour and keeping Neo4j
-        # property types simple (no datetime objects).
         records.append(
             {
                 headers[i]: "" if val is None else str(val)
@@ -46,6 +84,10 @@ def _sheet_to_records(ws) -> list[dict]:
             }
         )
     return records
+
+
+def _sheet_to_records(ws) -> list[dict]:
+    return _records_from_rows(list(ws.iter_rows(values_only=True)))
 
 
 def _parse_xlsx_sheets(content: bytes) -> dict[str, list[dict]]:
@@ -75,7 +117,8 @@ def parse_sheets(content: bytes, filename: str) -> dict[str, list[dict]]:
             data = [data]
         sheets = {stem: [d for d in data if isinstance(d, dict)]}
     elif name.endswith(".csv"):
-        sheets = {stem: list(csv.DictReader(io.StringIO(content.decode("utf-8-sig"))))}
+        rows = list(csv.reader(io.StringIO(content.decode("utf-8-sig"))))
+        sheets = {stem: _records_from_rows(rows)}
     else:
         raise HTTPException(400, "Unsupported file type; use .csv, .json, or .xlsx")
     sheets = {k: v for k, v in sheets.items() if v}

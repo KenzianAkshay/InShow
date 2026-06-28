@@ -125,6 +125,69 @@ def test_build_combined_ontology_across_tabs(auth_up, project):
     assert summary["edges"] == 4
 
 
+def test_records_from_rows_skips_banner_row():
+    from app.ingestion import _records_from_rows
+
+    rows = [
+        ("EXHIBITOR BOOTH AVAILABILITY & PRICING — TechExpo 2026", None, None, None),
+        (None, None, None, None),
+        ("Booth ID", "Exhibitor Name", "Booth Type", "Balance Due"),
+        ("BTH-1", "Acme", "Inline", "1200"),
+        ("BTH-2", "Globex", "Corner", "0"),
+    ]
+    records = _records_from_rows(rows)
+    assert len(records) == 2
+    assert set(records[0]) == {"Booth ID", "Exhibitor Name", "Booth Type", "Balance Due"}
+    assert records[0]["Exhibitor Name"] == "Acme"
+    # the banner title must not leak in as a column
+    assert all("TechExpo" not in k for r in records for k in r)
+
+
+def test_records_from_rows_no_banner_uses_first_row():
+    from app.ingestion import _records_from_rows
+
+    rows = [("a", "b"), ("1", "2"), ("3", "4")]
+    records = _records_from_rows(rows)
+    assert records == [{"a": "1", "b": "2"}, {"a": "3", "b": "4"}]
+
+
+def test_records_from_rows_names_blank_and_duplicate_headers():
+    from app.ingestion import _records_from_rows
+
+    rows = [("Name", None, "Name"), ("Acme", "x", "y")]
+    records = _records_from_rows(rows)
+    assert set(records[0]) == {"Name", "col1", "Name_1"}
+
+
+def test_upload_xlsx_with_title_banner(auth, project):
+    import io
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["EXHIBITOR BOOTH PRICING — TechExpo 2026"])  # banner
+    ws.append([None, None, None])  # blank
+    ws.append(["Booth ID", "Exhibitor Name", "Balance Due"])  # real header
+    ws.append(["BTH-1", "Acme", "1200"])
+    ws.append(["BTH-2", "Globex", "0"])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    r = auth.post(
+        f"/api/data-sources?project_id={project}",
+        files={
+            "file": (
+                "pricing.xlsx",
+                buf.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert r.status_code == 201
+    assert r.json()["records"] == 2
+
+
 def test_upload_unknown_project(auth):
     assert auth.post(
         "/api/data-sources?project_id=999999",
