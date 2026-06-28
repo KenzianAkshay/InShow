@@ -12,6 +12,8 @@ import ast
 import operator
 import re
 
+from app.ontology import schema_ontology
+
 INTERNAL = {"uid", "project_id", "source_id", "ingested_at"}
 
 
@@ -251,6 +253,52 @@ def make_dispatch(driver, project_id: int):
 
 
 # --- Artifact builders -------------------------------------------------------
+
+def suggest_followups(driver, project_id: int, query: str = "", limit: int = 4) -> list[str]:
+    """Recommend next questions a standard agent can answer, grounded in the
+    project's ontology. Intent-aware: skips suggestions that just repeat what the
+    user asked, so the chips surface *other* angles to explore. Returns answerable
+    prompts (group-by charts, counts, overview) — clicking one yields a real
+    answer via the same analytics path."""
+    schema = schema_ontology(driver, project_id)
+    classes = schema.get("classes", [])
+    edges = schema.get("edges", [])
+    if not classes:
+        return []
+    asked = (query or "").lower()
+    out: list[str] = []
+
+    # Group-by charts from the class↔dimension edges (most informative). Skip a
+    # pair only if the user already referenced both of its classes.
+    seen_pairs: set[tuple[str, str]] = set()
+    for e in edges:
+        pair = (e["from"], e["to"])
+        if pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+        if e["from"].lower() in asked and e["to"].lower() in asked:
+            continue
+        out.append(f"Chart {e['from']} by {e['to']}")
+        if len(out) >= 2:
+            break
+
+    # Count of a class the user hasn't just asked about.
+    for c in classes:
+        if c["name"].lower() not in asked:
+            out.append(f"How many {c['name']}?")
+            break
+
+    if len(classes) > 1:
+        out.append("Show entities per class")
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for s in out:
+        if s not in seen:
+            deduped.append(s)
+            seen.add(s)
+    return deduped[:limit]
+
 
 def bar_artifact(title: str, data: list[dict]) -> dict:
     return {"type": "bar", "title": title, "data": data[:20]}

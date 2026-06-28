@@ -132,6 +132,16 @@ def _deterministic(request: Request, project_id: int, query: str) -> dict | None
         return None
 
 
+def _suggest(request: Request, project_id: int, query: str) -> list[str]:
+    """Ontology-grounded, intent-aware next-question suggestions (best-effort)."""
+    try:
+        driver = request.app.state.neo4j
+        driver.verify_connectivity()
+        return analytics.suggest_followups(driver, project_id, query)
+    except Exception:
+        return []
+
+
 def _ontology_context(request: Request, query: str, project_id: int) -> dict:
     """Gather everything the agent is allowed to reason over: a high-level
     overview of the project's ontology (so it knows the universe of entities even
@@ -155,7 +165,7 @@ def _build_system(config: dict, grounding: dict, peers: list | None = None) -> s
     # platform's grounding and analytics rules are always appended after it.
     system = (
         config.get("system_prompt")
-        or "You are an InShow exhibitor-services agent for trade shows."
+        or "You are a ShowSphere exhibitor-services agent for trade shows."
     )
     system += (
         "\n\nBe warm and courteous: greet the user, respond briefly to small talk, "
@@ -488,7 +498,13 @@ def chat(
                 None,
             )
 
-    metadata = {"traversal": grounding["traversal"], "artifact": artifact}
+    # Recommend next questions, grounded in the ontology and the user's intent.
+    suggestions = _suggest(request, project_id, payload.content)
+    metadata = {
+        "traversal": grounding["traversal"],
+        "artifact": artifact,
+        "suggestions": suggestions,
+    }
     conn = connect()
     conn.execute(
         "INSERT INTO messages (session_id, role, content, metadata) "
@@ -501,4 +517,5 @@ def chat(
         "content": content,
         "traversal": grounding["traversal"],
         "artifact": artifact,
+        "suggestions": suggestions,
     }

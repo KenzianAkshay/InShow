@@ -103,3 +103,58 @@ def test_deterministic_count():
 
 def test_deterministic_no_intent_returns_none():
     assert analytics.deterministic_analytics(D, 1, "hello, who are you") is None
+
+
+class _SchemaSess:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def run(self, q, **kw):
+        if "RETURN name, count(*) AS count" in q:
+            return [{"name": "Exhibitors", "count": 5}, {"name": "City", "count": 3}]
+        if "RETURN frm AS from" in q:
+            return [{"from": "Exhibitors", "to": "City", "type": "HAS_CITY", "count": 7}]
+        return []
+
+
+class _SchemaDriver:
+    def session(self):
+        return _SchemaSess()
+
+
+SD = _SchemaDriver()
+
+
+def test_suggest_followups_from_schema():
+    out = analytics.suggest_followups(SD, 1)
+    assert "Chart Exhibitors by City" in out
+    assert any(s.startswith("How many") for s in out)
+    assert "Show entities per class" in out
+
+
+def test_suggest_followups_is_intent_aware():
+    out = analytics.suggest_followups(SD, 1, "how many exhibitors are there")
+    # already asked about Exhibitors counts -> suggest a different class instead
+    assert "How many Exhibitors?" not in out
+    assert out  # still offers other angles (charts, overview)
+
+
+def test_suggest_followups_empty_without_ontology():
+    class _Empty:
+        def session(self):
+            class _S:
+                def __enter__(self_):
+                    return self_
+
+                def __exit__(self_, *a):
+                    return False
+
+                def run(self_, *a, **k):
+                    return []
+
+            return _S()
+
+    assert analytics.suggest_followups(_Empty(), 1) == []
