@@ -1,6 +1,7 @@
 import hashlib
 import re
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from neo4j import Driver
 
@@ -334,6 +335,101 @@ def read_ontology(driver: Driver, project_id: int, limit: int = 250) -> dict:
         "nodes": nodes,
         "edges": edges,
     }
+
+
+def export_jsonld(driver: Driver, project_id: int, scope: str = "full") -> dict:
+    """Serialise a project's ontology as JSON-LD (valid RDF / OWL). The schema
+    becomes owl:Class / owl:ObjectProperty declarations; with scope='full' each
+    entity becomes an individual with its properties and relationship assertions.
+    JSON-LD is lossless for this model and re-importable into ontology tooling."""
+    base = f"urn:inshow:{project_id}:"
+    context = {
+        "owl": "http://www.w3.org/2002/07/owl#",
+        "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+        "label": "rdfs:label",
+        "domain": {"@id": "rdfs:domain", "@type": "@id"},
+        "range": {"@id": "rdfs:range", "@type": "@id"},
+    }
+    graph: list[dict] = []
+
+    with driver.session() as session:
+        classes = [
+            r["name"]
+            for r in session.run(
+                "MATCH (c:OntologyClass {project_id: $pid}) RETURN c.name AS name "
+                "ORDER BY name",
+                pid=project_id,
+            )
+            if r["name"]
+        ]
+        relations = [
+            r["name"]
+            for r in session.run(
+                "MATCH (r:OntologyRelation {project_id: $pid}) RETURN r.name AS name "
+                "ORDER BY name",
+                pid=project_id,
+            )
+            if r["name"]
+        ]
+        # domain/range per relation type, inferred from the instance edges
+        rel_dr = {
+            (r["type"]): (r["frm"], r["to"])
+            for r in session.run(
+                "MATCH (a:Entity {project_id: $pid})-[rel]->(b:Entity {project_id: $pid}) "
+                "WITH type(rel) AS type, "
+                "[l IN labels(a) WHERE l <> 'Entity'][0] AS frm, "
+                "[l IN labels(b) WHERE l <> 'Entity'][0] AS to "
+                "RETURN type, frm, to LIMIT 5000",
+                pid=project_id,
+            )
+        }
+
+        for c in classes:
+            graph.append(
+                {"@id": f"{base}class/{c}", "@type": "owl:Class", "label": c}
+            )
+        for rel in relations:
+            node = {"@id": f"{base}rel/{rel}", "@type": "owl:ObjectProperty", "label": rel}
+            dr = rel_dr.get(rel)
+            if dr and dr[0]:
+                node["domain"] = f"{base}class/{dr[0]}"
+            if dr and dr[1]:
+                node["range"] = f"{base}class/{dr[1]}"
+            graph.append(node)
+
+        if scope == "full":
+            node_map: dict[str, dict] = {}
+            for r in session.run(
+                "MATCH (e:Entity {project_id: $pid}) RETURN e.uid AS uid, "
+                "[l IN labels(e) WHERE l <> 'Entity'][0] AS label, "
+                "properties(e) AS props",
+                pid=project_id,
+            ):
+                uid = r["uid"]
+                obj = {
+                    "@id": f"{base}entity/{quote(uid, safe='')}",
+                    "@type": f"{base}class/{r['label'] or 'Entity'}",
+                    "label": uid.split(":", 1)[1] if ":" in uid else uid,
+                }
+                for k, v in (r["props"] or {}).items():
+                    if k not in _INTERNAL_KEYS and str(v).strip() != "":
+                        obj[f"{base}prop/{k}"] = v
+                node_map[uid] = obj
+            for r in session.run(
+                "MATCH (a:Entity {project_id: $pid})-[rel]->(b:Entity {project_id: $pid}) "
+                "RETURN a.uid AS frm, type(rel) AS type, b.uid AS to",
+                pid=project_id,
+            ):
+                subj = node_map.get(r["frm"])
+                if subj is None:
+                    continue
+                key = f"{base}rel/{r['type']}"
+                subj.setdefault(key, []).append(
+                    {"@id": f"{base}entity/{quote(r['to'], safe='')}"}
+                )
+            graph.extend(node_map.values())
+
+    return {"@context": context, "@id": base, "@graph": graph}
 
 
 def schema_ontology(driver: Driver, project_id: int) -> dict:

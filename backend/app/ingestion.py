@@ -5,12 +5,14 @@ import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 
 from app.auth import require_user
 from app.db import DATABASE_PATH, connect
 from app.ontology import (
     build_graph,
     class_instances,
+    export_jsonld,
     infer_combined_ontology,
     read_ontology,
     schema_ontology,
@@ -205,3 +207,17 @@ def get_ontology_instances(
 ):
     """Instances of one class plus their neighbours — drill-down from the schema."""
     return class_instances(_neo4j(request), project_id, label, limit)
+
+
+@router.get("/ontology/export")
+def export_ontology(request: Request, project_id: int, scope: str = "full"):
+    """Download the project's ontology as JSON-LD. scope=schema for the model only
+    (classes + relationship types) or full to include all instances."""
+    scope = "schema" if scope == "schema" else "full"
+    data = export_jsonld(_neo4j(request), project_id, scope)
+    filename = f"ontology-project-{project_id}-{scope}.jsonld"
+    return JSONResponse(
+        content=data,
+        media_type="application/ld+json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

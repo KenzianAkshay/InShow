@@ -1,6 +1,9 @@
+from urllib.parse import quote
+
 from app.ontology import (
     build_graph,
     class_instances,
+    export_jsonld,
     infer_combined_ontology,
     infer_ontology,
     instantiate_ontology,
@@ -223,6 +226,64 @@ class _InstSession:
 class _InstDriver:
     def session(self):
         return _InstSession()
+
+
+class _ExportSession:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def run(self, q, **kw):
+        if "MATCH (c:OntologyClass" in q:
+            return [{"name": "City"}, {"name": "Exhibitors"}]
+        if "MATCH (r:OntologyRelation" in q:
+            return [{"name": "HAS_CITY"}]
+        if "a.uid AS frm" in q:  # full-scope edge assertions
+            return [{"frm": "Exhibitors:abc", "type": "HAS_CITY", "to": "City:Berlin"}]
+        if "WITH type(rel) AS type" in q:  # domain/range inference
+            return [{"type": "HAS_CITY", "frm": "Exhibitors", "to": "City"}]
+        if "properties(e) AS props" in q:
+            return [
+                {
+                    "uid": "Exhibitors:abc",
+                    "label": "Exhibitors",
+                    "props": {"booth": "A12", "project_id": 1, "uid": "Exhibitors:abc"},
+                },
+                {"uid": "City:Berlin", "label": "City", "props": {"value": "Berlin"}},
+            ]
+        return []
+
+
+class _ExportDriver:
+    def session(self):
+        return _ExportSession()
+
+
+def test_export_jsonld_full():
+    out = export_jsonld(_ExportDriver(), 1, "full")
+    assert "@context" in out and "@graph" in out
+    base = "urn:inshow:1:"
+    ids = {n["@id"]: n for n in out["@graph"]}
+    assert ids[base + "class/City"]["@type"] == "owl:Class"
+    prop = ids[base + "rel/HAS_CITY"]
+    assert prop["@type"] == "owl:ObjectProperty"
+    assert prop["domain"] == base + "class/Exhibitors"
+    assert prop["range"] == base + "class/City"
+    ent = ids[base + "entity/" + quote("Exhibitors:abc", safe="")]
+    assert ent["@type"] == base + "class/Exhibitors"
+    assert ent[base + "prop/booth"] == "A12"
+    assert base + "prop/project_id" not in ent  # internal keys filtered
+    assert ent[base + "rel/HAS_CITY"][0]["@id"] == base + "entity/" + quote(
+        "City:Berlin", safe=""
+    )
+
+
+def test_export_jsonld_schema_only_has_no_instances():
+    out = export_jsonld(_ExportDriver(), 1, "schema")
+    assert all("entity/" not in n["@id"] for n in out["@graph"])
+    assert any(n["@type"] == "owl:Class" for n in out["@graph"])
 
 
 def test_class_instances_builds_subgraph():

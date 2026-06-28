@@ -11,6 +11,7 @@ import {
   Cloud,
   Cpu,
   Database,
+  Download,
   FileJson,
   FileSpreadsheet,
   FileText,
@@ -301,6 +302,18 @@ export default function ProjectDescribe({ projectId, onClose }: Props) {
                   subtitle={`${data.ontology.node_total} nodes · ${data.ontology.relation_total} relationships · ${data.ontology.classes.length} node types · ${data.ontology.relations.length} relationship types`}
                   accent={ACCENT.ontology}
                 >
+                  {data.ontology.node_total > 0 && (
+                    <div className="mb-3 flex justify-end">
+                      <a
+                        href={`/api/ontology/export?project_id=${projectId}&scope=full`}
+                        download
+                        className="ring-focus inline-flex items-center gap-1.5 rounded-lg border border-border bg-[var(--glass-bg)] px-2.5 py-1.5 text-xs font-semibold text-muted-foreground backdrop-blur-md transition-colors hover:text-foreground"
+                      >
+                        <Download className="size-3.5" />
+                        Export JSON-LD
+                      </a>
+                    </div>
+                  )}
                   {data.ontology.node_total === 0 ? (
                     <p className="text-sm text-muted-foreground">
                       No ontology built yet. Ingest data and build the ontology from an

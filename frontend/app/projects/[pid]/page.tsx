@@ -4,7 +4,15 @@ import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, Bot, Layers, Plus, Trash2, TriangleAlert } from "lucide-react";
+import {
+  ArrowRight,
+  Bot,
+  Layers,
+  Network,
+  Plus,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { api, Agent, ShowProject } from "@/lib/api";
 import AgentRibbon from "@/app/components/AgentRibbon";
 import ProjectDescribe from "@/app/components/ProjectDescribe";
@@ -73,6 +81,13 @@ export default function ProjectDetail() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h1 className="text-3xl font-bold tracking-tight">{project.name}</h1>
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => router.push(`/projects/${projectId}/ontology`)}
+            >
+              <Network className="size-4" />
+              Open ontology
+            </Button>
             <Button variant="secondary" onClick={() => setDescribing(true)}>
               <Layers className="size-4" />
               Describe Project
