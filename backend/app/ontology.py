@@ -19,13 +19,18 @@ def sanitize_rel(name: str) -> str:
     return rel
 
 
-def infer_ontology(records: list[dict], source_name: str) -> dict:
+def infer_ontology(
+    records: list[dict], source_name: str, all_columns: bool = False
+) -> dict:
     """Infer a graph model from tabular/record data.
 
-    Low-cardinality columns become shared dimension entities (so records link
-    to common nodes, forming a connected ontology); the rest become properties
-    on the record node. Deterministic, so re-running merges rather than
-    duplicates.
+    By default, low-cardinality columns become shared dimension entities (so
+    records link to common nodes, forming a connected ontology) and the rest
+    become properties on the record node. With ``all_columns=True`` (star
+    schema), *every* non-empty column becomes its own entity class — each
+    distinct value a node — and the record node is the hub linking a row's
+    values together; nothing is folded into properties. Deterministic either
+    way, so re-running merges rather than duplicates.
     """
     records = [r for r in records if isinstance(r, dict)]
     columns: list[str] = []
@@ -45,7 +50,11 @@ def infer_ontology(records: list[dict], source_name: str) -> dict:
     dimension_cols, property_cols = [], []
     for c in columns:
         d = len(distinct[c])
-        if 0 < d < n and d <= max(3, n // 2):
+        if all_columns:
+            # Every column with any data becomes its own class (empty columns
+            # are dropped — they have no values to make nodes from).
+            (dimension_cols if d > 0 else property_cols).append(c)
+        elif 0 < d < n and d <= max(3, n // 2):
             dimension_cols.append(c)
         else:
             property_cols.append(c)
@@ -176,18 +185,22 @@ def merge_specs(specs: list[dict], source_name: str) -> dict:
     }
 
 
-def infer_combined_ontology(sheets: dict[str, list[dict]], source_name: str) -> dict:
+def infer_combined_ontology(
+    sheets: dict[str, list[dict]], source_name: str, all_columns: bool = False
+) -> dict:
     """Build one ontology spanning every tab/sheet. Each tab becomes its own
     entity class (keyed by tab name); tabs are linked automatically wherever they
-    share dimension values. Falls back to a single empty spec if no tab has rows.
+    share dimension values. With ``all_columns=True`` every column in every tab
+    becomes its own class (star schema). Falls back to a single empty spec if no
+    tab has rows.
     """
     specs = [
-        infer_ontology(records, sheet_name)
+        infer_ontology(records, sheet_name, all_columns=all_columns)
         for sheet_name, records in sheets.items()
         if records
     ]
     if not specs:
-        return infer_ontology([], source_name)
+        return infer_ontology([], source_name, all_columns=all_columns)
     return merge_specs(specs, source_name)
 
 

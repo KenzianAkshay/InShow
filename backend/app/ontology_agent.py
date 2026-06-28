@@ -86,6 +86,7 @@ def build_with_agent(
 
 class BuildRequest(BaseModel):
     data_source_id: int | None = None
+    all_columns: bool | None = None
 
 
 @router.post("/agents/{agent_id}/build")
@@ -121,8 +122,19 @@ def agent_build(agent_id: int, payload: BuildRequest, request: Request):
     has_key = bool(config.get("api_key")) or bool(
         os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY")
     )
+    # Star-schema toggle: explicit request wins, else the saved agent setting.
+    all_columns = (
+        payload.all_columns
+        if payload.all_columns is not None
+        else bool(config.get("all_columns_as_nodes"))
+    )
     method = "deterministic"
-    if agent["type"] == "ontology_creation" and has_key:
+    if all_columns:
+        # "Every column is its own node" is a deterministic structural choice;
+        # honour it directly rather than letting the LLM redesign the schema.
+        spec = infer_combined_ontology(sheets, name, all_columns=True)
+        method = "deterministic-all-columns"
+    elif agent["type"] == "ontology_creation" and has_key:
         provider = get_provider(
             agent["model_provider"], agent["model_name"], config.get("api_key")
         )

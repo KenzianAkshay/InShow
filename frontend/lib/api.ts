@@ -93,10 +93,14 @@ export const api = {
   buildAgentOntology: (
     agentId: number,
     dataSourceId: number,
+    allColumns?: boolean,
   ): Promise<OntologySummary> =>
     req(`/api/agents/${agentId}/build`, {
       method: "POST",
-      body: JSON.stringify({ data_source_id: dataSourceId }),
+      body: JSON.stringify({
+        data_source_id: dataSourceId,
+        all_columns: allColumns,
+      }),
     }),
   getOntology: (projectId: number): Promise<Ontology> =>
     req(`/api/ontology?project_id=${projectId}`),

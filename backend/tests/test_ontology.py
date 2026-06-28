@@ -46,6 +46,32 @@ def test_infer_ontology_evolution_is_superset():
     assert "City:Paris" in b and "City:Paris" not in a
 
 
+def test_infer_ontology_all_columns_star_schema():
+    spec = infer_ontology(ROWS, "exhibitors", all_columns=True)
+    # every column is now its own class, including the high-cardinality ones
+    # that the default model keeps as properties (booth, exhibitor)
+    assert {"Exhibitor", "Booth", "City", "Stage"} <= set(spec["classes"])
+    # 4 record hubs + 4 Exhibitor + 4 Booth + 2 City + 3 Stage value nodes
+    assert len(spec["nodes"]) == 17
+    # every row links to all four of its column values
+    assert len(spec["edges"]) == 16
+    # the record hub carries no folded-in properties in star mode
+    rec = next(n for n in spec["nodes"] if n["label"] == "Exhibitors")
+    assert rec["properties"] == {}
+
+
+def test_infer_ontology_default_keeps_high_cardinality_as_properties():
+    spec = infer_ontology(ROWS, "exhibitors")
+    # contrast with star schema: unique-ish columns stay off the class list
+    assert "Booth" not in spec["classes"]
+    assert "Exhibitor" not in spec["classes"]
+
+
+def test_infer_combined_ontology_all_columns_passes_through():
+    spec = infer_combined_ontology({"Exhibitors": ROWS}, "expo", all_columns=True)
+    assert {"Exhibitor", "Booth", "City", "Stage"} <= set(spec["classes"])
+
+
 def test_instantiate_ontology_with_mapping():
     mapping = {
         "classes": [

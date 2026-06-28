@@ -36,6 +36,7 @@ export default function AgentSetup() {
   const [dataSourceId, setDataSourceId] = useState<number | "">("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [ontology, setOntology] = useState("");
+  const [allColumns, setAllColumns] = useState(false);
   const [saved, setSaved] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -71,7 +72,9 @@ export default function AgentSetup() {
     setNotice(null);
     setSummary(null);
     try {
-      setSummary(await api.buildAgentOntology(agentId, Number(dataSourceId)));
+      setSummary(
+        await api.buildAgentOntology(agentId, Number(dataSourceId), allColumns),
+      );
     } catch {
       setNotice("Build failed. Ensure Neo4j is running.");
     } finally {
@@ -90,6 +93,7 @@ export default function AgentSetup() {
         setDataSourceId(a.data_source_id ?? "");
         setSystemPrompt(String(a.config?.system_prompt ?? ""));
         setOntology(String(a.config?.ontology_instructions ?? ""));
+        setAllColumns(Boolean(a.config?.all_columns_as_nodes));
         if (a.show_project_id !== null) {
           setProjectId(a.show_project_id);
           refreshDataSources(a.show_project_id);
@@ -107,6 +111,7 @@ export default function AgentSetup() {
         system_prompt: systemPrompt,
         ontology_instructions: ontology,
         api_key: apiKey,
+        all_columns_as_nodes: allColumns,
       },
     });
     setAgent(updated);
@@ -245,6 +250,23 @@ export default function AgentSetup() {
                 {busy === "build" ? "Building..." : "Build ontology"}
               </Button>
             </div>
+
+            <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-sm">
+              <input
+                type="checkbox"
+                checked={allColumns}
+                onChange={(e) => setAllColumns(e.target.checked)}
+                className="mt-0.5 size-4 shrink-0 accent-accent"
+              />
+              <span>
+                Treat every column as its own node
+                <span className="block text-xs text-muted-foreground">
+                  Star schema: each column becomes a class and each value a node
+                  (e.g. Exhibitor Name, Balance Due), instead of high-cardinality
+                  columns being kept as properties. Save, then Build to apply.
+                </span>
+              </span>
+            </label>
           </div>
 
           {notice && (
